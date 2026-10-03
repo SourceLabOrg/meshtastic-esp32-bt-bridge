@@ -5,3 +5,10 @@
 *.bin
 *.elf
 *.map
+
+# JetBrains IDEs
+.idea/*
+!.idea/runConfigurations/
+!.idea/vcs.xml
+!.idea/modules.xml
+!.idea/*.iml
