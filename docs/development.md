@@ -25,7 +25,7 @@ In your IntelliJ terminal at the root of the project, run:
 ```bash
 pio init --ide clion
 ```
-*(If you are using standard IntelliJ IDEA, you can try `--ide idea`. It will generate the necessary `.iml` and workspace files).*
+*(If you are using standard IntelliJ IDEA, you can try `--ide clion`. It will generate the necessary `.iml` and workspace files).*
 
 ## 3. Building the Project
 To compile the C++ code without flashing it (useful for checking for syntax errors):
