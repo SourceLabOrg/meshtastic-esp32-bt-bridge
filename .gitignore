@@ -1,0 +1,7 @@
+.pio
+.vscode
+.devcontainer/*.log
+*.o
+*.bin
+*.elf
+*.map

@@ -1,0 +1,14 @@
+{
+	"name": "PlatformIO ESP32 Bridge",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"platformio.platformio-ide",
+				"ms-vscode.cpptools"
+			]
+		}
+	}
+}
