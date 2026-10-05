@@ -254,14 +254,19 @@ static void bridgeBleTask(void* parameter) {
                 bool doRead = pendingRadioRead || (millis() - lastFailsafe > 250);
                 
                 if (doRead) {
+                    bool wasNotified = pendingRadioRead; // Capture this before clearing it!
                     pendingRadioRead = false;
                     lastFailsafe = millis();
                     
                     static std::string lastPacket = "";
+                    static unsigned long lastPacketTime = 0;
                     std::string currentVal = fromRadioChar->readValue();
                     
-                    if (currentVal.length() > 0 && currentVal != lastPacket) {
+                    // Accept the packet if it's different, OR if the radio explicitly notified us it was new,
+                    // OR if 2.5 seconds have passed (failsafe for dropped identical heartbeat notifications)
+                    if (currentVal.length() > 0 && (currentVal != lastPacket || wasNotified || (millis() - lastPacketTime > 2500))) {
                         lastPacket = currentVal;
+                        lastPacketTime = millis();
                         
                         DBG_PRINTF("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!\n", currentVal.length());
                         
