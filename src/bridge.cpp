@@ -55,7 +55,9 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     }
     
     // Crucial TCP connection parameters for stable bridging
-    client->setNoDelay(true); // Disable Nagle's algorithm for instant transmission
+    // We intentionally leave Nagle's algorithm enabled (false) so LwIP batches the tiny 
+    // BLE packets together. This prevents WiFi congestion and TCP retransmission timeouts.
+    client->setNoDelay(false); 
     client->setRxTimeout(600); // 10 minute idle timeout
 
     ClientContext* ctx = new ClientContext();
@@ -145,7 +147,7 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         packet.data = (uint8_t*)malloc(length);
         if (packet.data) {
             memcpy(packet.data, pData, length);
-            if (xQueueSend(ble_to_tcp_queue, &packet, 0) != pdTRUE) {
+            if (xQueueSend(ble_to_tcp_queue, &packet, pdMS_TO_TICKS(50)) != pdTRUE) {
                 free(packet.data);
             }
         }
@@ -268,7 +270,9 @@ static void bridgeBleTask(void* parameter) {
                         rx_packet.data = (uint8_t*)malloc(rx_packet.len);
                         if (rx_packet.data) {
                             memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
-                            if (xQueueSend(ble_to_tcp_queue, &rx_packet, 0) != pdTRUE) {
+                            // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
+                            if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
+                                Serial.printf("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes\n", rx_packet.len);
                                 free(rx_packet.data);
                             }
                         }
@@ -295,17 +299,26 @@ static void bridgeNetTask(void* parameter) {
             #if BRIDGE_DEBUG
             Serial.printf("[Bridge-Net] Broadcasting %zu bytes to %zu TCP clients\n", packet.len, connectedClientsCount.load());
             #endif
-            // Build TCP frame
-            uint8_t header[4] = {0x94, 0xC3, (uint8_t)(packet.len >> 8), (uint8_t)(packet.len & 0xFF)};
-            
-            // Send to all connected clients
-            for (ClientContext* ctx : tcpClients) {
-                if (ctx->client->space() >= packet.len + 4) {
-                    ctx->client->write((const char*)header, 4);
-                    ctx->client->write((const char*)packet.data, packet.len);
-                } else {
-                    Serial.printf("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s\n", packet.len, ctx->client->remoteIP().toString().c_str());
+            // Build contiguous TCP frame to prevent fragmentation desyncs
+            size_t frame_len = packet.len + 4;
+            uint8_t* frame = (uint8_t*)malloc(frame_len);
+            if (frame) {
+                frame[0] = 0x94;
+                frame[1] = 0xC3;
+                frame[2] = (uint8_t)(packet.len >> 8);
+                frame[3] = (uint8_t)(packet.len & 0xFF);
+                memcpy(&frame[4], packet.data, packet.len);
+                
+                // Send to all connected clients
+                for (ClientContext* ctx : tcpClients) {
+                    if (ctx->client->space() >= frame_len) {
+                        ctx->client->write((const char*)frame, frame_len);
+                        ctx->client->send(); // Force immediate transmission
+                    } else {
+                        Serial.printf("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s\n", packet.len, ctx->client->remoteIP().toString().c_str());
+                    }
                 }
+                free(frame);
             }
             free(packet.data);
         }
@@ -320,8 +333,9 @@ void bridge_init(const String& ble_mac) {
     BridgeConfig cfg = config_ui_load();
     targetBlePin = cfg.ble_pin.toInt();
 
-    tcp_to_ble_queue = xQueueCreate(10, sizeof(BridgePacket));
-    ble_to_tcp_queue = xQueueCreate(10, sizeof(BridgePacket));
+    // Massive queues to handle high-speed bursts of Meshtastic Node DB packets
+    tcp_to_ble_queue = xQueueCreate(100, sizeof(BridgePacket));
+    ble_to_tcp_queue = xQueueCreate(100, sizeof(BridgePacket));
     
     tcpServer = new AsyncServer(TCP_PORT);
     tcpServer->onClient(&onClientConnected, tcpServer);
