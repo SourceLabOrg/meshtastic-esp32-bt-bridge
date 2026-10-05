@@ -53,6 +53,10 @@ static void onClientConnected(void* arg, AsyncClient* client) {
         client->close();
         return;
     }
+    
+    // Crucial TCP connection parameters for stable bridging
+    client->setNoDelay(true); // Disable Nagle's algorithm for instant transmission
+    client->setRxTimeout(600); // 10 minute idle timeout
 
     ClientContext* ctx = new ClientContext();
     ctx->client = client;
@@ -124,7 +128,11 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     }, ctx);
 }
 
-// BLE Notify Callbacks
+static volatile bool pendingRadioRead = false;
+
+static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+    pendingRadioRead = true;
+}
 
 static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (connectedClientsCount.load() == 0) return;
@@ -200,9 +208,10 @@ static void bridgeBleTask(void* parameter) {
                     fromRadioChar = pSvc->getCharacteristic("2c55e69e-4993-11ed-b878-0242ac120002");
                     fromNumChar = pSvc->getCharacteristic("ed9da18c-a800-4f66-a670-aa7547e34453");
                     
-                    // Note: We intentionally DO NOT subscribe to fromNumChar here.
-                    // Calling a blocking readValue() inside a notification callback deadlocks the NimBLE stack.
-                    // Instead, we rely on the 100ms polling loop below to read fromRadioChar.
+                    if (fromNumChar && fromNumChar->canNotify()) {
+                        bool sub = fromNumChar->subscribe(true, notifyFromNum);
+                        DBG_PRINTF("[Bridge-BLE] Subscribed to FromNum: %d\n", sub);
+                    }
                     
                     if (fromRadioChar && fromRadioChar->canNotify()) {
                         bool sub = fromRadioChar->subscribe(true, notifyFromRadio);
@@ -219,8 +228,11 @@ static void bridgeBleTask(void* parameter) {
             }
         } else {
             BridgePacket packet;
-            // Wait up to 100ms for incoming TCP packets to send to BLE
-            if (xQueueReceive(tcp_to_ble_queue, &packet, pdMS_TO_TICKS(100)) == pdTRUE) {
+            // If we have a pending read, do not sleep at all (0 ticks). 
+            // Otherwise, wait up to 10ms for incoming TCP packets to keep the loop fast.
+            TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
+            
+            if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
                 #if BRIDGE_DEBUG
                 Serial.printf("[Bridge-BLE] Writing %zu bytes to ToRadio...\n", packet.len);
                 #endif
@@ -234,26 +246,36 @@ static void bridgeBleTask(void* parameter) {
                 free(packet.data);
             }
             
-            // POLLING FALLBACK (Matches Python reference bridge behavior)
-            // Some Meshtastic devices fail to trigger FromNum notifications. 
-            // We poll FromRadio every ~100ms (dictated by the xQueueReceive timeout above)
+            static unsigned long lastFailsafe = 0;
             if (fromRadioChar && connectedClientsCount.load() > 0) {
-                static std::string lastPacket = "";
-                std::string currentVal = fromRadioChar->readValue();
+                // Read if notified, or if it's been 250ms since last check (failsafe)
+                bool doRead = pendingRadioRead || (millis() - lastFailsafe > 250);
                 
-                if (currentVal.length() > 0 && currentVal != lastPacket) {
-                    lastPacket = currentVal;
+                if (doRead) {
+                    pendingRadioRead = false;
+                    lastFailsafe = millis();
                     
-                    DBG_PRINTF("[Bridge-BLE] Polled %d new bytes from FromRadio!\n", currentVal.length());
+                    static std::string lastPacket = "";
+                    std::string currentVal = fromRadioChar->readValue();
                     
-                    BridgePacket rx_packet;
-                    rx_packet.len = currentVal.length();
-                    rx_packet.data = (uint8_t*)malloc(rx_packet.len);
-                    if (rx_packet.data) {
-                        memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
-                        if (xQueueSend(ble_to_tcp_queue, &rx_packet, 0) != pdTRUE) {
-                            free(rx_packet.data);
+                    if (currentVal.length() > 0 && currentVal != lastPacket) {
+                        lastPacket = currentVal;
+                        
+                        DBG_PRINTF("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!\n", currentVal.length());
+                        
+                        BridgePacket rx_packet;
+                        rx_packet.len = currentVal.length();
+                        rx_packet.data = (uint8_t*)malloc(rx_packet.len);
+                        if (rx_packet.data) {
+                            memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
+                            if (xQueueSend(ble_to_tcp_queue, &rx_packet, 0) != pdTRUE) {
+                                free(rx_packet.data);
+                            }
                         }
+                        
+                        // We successfully pulled a NEW packet! There might be more packets 
+                        // instantly waiting in the queue. Flag it to instantly read again on the next loop!
+                        pendingRadioRead = true;
                     }
                 }
             }
@@ -281,6 +303,8 @@ static void bridgeNetTask(void* parameter) {
                 if (ctx->client->space() >= packet.len + 4) {
                     ctx->client->write((const char*)header, 4);
                     ctx->client->write((const char*)packet.data, packet.len);
+                } else {
+                    Serial.printf("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s\n", packet.len, ctx->client->remoteIP().toString().c_str());
                 }
             }
             free(packet.data);
