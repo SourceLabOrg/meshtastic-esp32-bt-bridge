@@ -10,7 +10,8 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 ### 1. Modular Card Design
 * **WiFi Network Card:**
   * Displays the current configured SSID and masked password status.
-  * In Edit mode, provides fields for SSID and Password with a **Show/Hide** toggle to unmask the password.
+  * In Edit mode, offers a live scan dropdown of nearby WiFi networks (with RSSI signal levels and lock/open security indicators), manual SSID entry for hidden networks, and Password input with a **Show/Hide** toggle.
+  * Features a **🔍 Scan for Networks** button (with scan in progress indicator and scan/save buttons disabled during scans).
   * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
 * **Bluetooth Target Card:**
   * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed) and masked PIN.
@@ -18,13 +19,13 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
   * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
 * **System Actions Card:**
-  * Contains a prominent **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
+  * Contains a **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
+  * Contains a **Reset All Settings** action (with confirmation dialog) that clears all stored NVS credentials and restarts into Setup Mode.
 
-### 2. Live BLE Scanning
-* Initiated via **🔍 Scan for Devices** (or automatically when expanding BLE edit mode).
-* Runs an active 4-second BLE scan with duplicate filtering.
-* Discovered devices are sorted with named devices first, ordered by signal strength (RSSI in dBm).
-* UI displays `-- Scan in progress... --` and disables scan/test/save buttons during the scan to avoid radio contention.
+### 2. Live WiFi & BLE Scanning
+* **WiFi Scanning:** Runs asynchronously via `WiFi.scanNetworks(true)` in `WIFI_AP_STA` mode without dropping the captive portal AP connection. Discovered networks are deduplicated and ordered by signal strength (RSSI).
+* **BLE Scanning:** Initiated via **🔍 Scan for Devices** (or automatically when expanding BLE edit mode). Runs an active 4-second BLE scan with duplicate filtering, sorted with named devices first.
+* Both scanners show `-- Scan in progress... --` and disable action buttons during active scans to prevent radio contention.
 
 ### 3. Live Connection & PIN Verification
 * Clicking **⚡ Test Connection** connects to the specified MAC address and authenticates with the provided 6-digit PIN.
@@ -35,12 +36,18 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 ## System Workflow & Endpoints
 
 1. **AP Mode Initialization (`wifi_net.cpp`)**:
-   * The ESP32 starts an open WiFi AP (`Meshtastic-Bridge-Setup` at `192.168.4.1`).
+   * The ESP32 starts an open WiFi AP (`Meshtastic-Bridge-Setup` at `192.168.4.1`) in `WIFI_AP_STA` mode whenever:
+     * The physical `BOOT` button is pressed during the 3-second startup window (or held for 2 seconds at runtime).
+     * No WiFi credentials (`wifi_ssid`) are configured.
+     * No Bluetooth target device (`ble_mac`) is configured.
+     * Connecting to the configured WiFi network fails during normal boot.
    * A `DNSServer` intercepts DNS queries and redirects captive portal clients to `http://192.168.4.1/`.
 
 2. **Web Server Endpoints (`config_ui.cpp`)**:
    * **`GET /`**: Serves the single-page HTML/CSS/JS application with explicit UTF-8 encoding.
    * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"..."}`.
+   * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
+   * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
    * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.
    * **`GET /scan_results`**: Polls scan progress and returns JSON array of discovered devices: `[{"name":"Meshtastic_xxxx","mac":"AA:BB:CC:DD:EE:FF","rssi":-68}]`.
    * **`POST /start_test_ble`**: Launches a background FreeRTOS task to test BLE pairing and GATT service discovery for the given MAC and PIN.
@@ -48,6 +55,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
    * **`POST /save_wifi`**: Saves `wifi_ssid` and `wifi_pass` to NVS.
    * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS.
    * **`POST /reboot`**: Restarts the ESP32 into normal bridge mode.
+   * **`POST /reset`**: Erases all stored NVS configurations and reboots the ESP32 into Setup Mode.
    * **`POST /save`**: Full-form save endpoint for backward compatibility.
 
 ## Memory & Non-Volatile Storage (NVS)

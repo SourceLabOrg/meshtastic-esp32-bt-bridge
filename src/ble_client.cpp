@@ -1,4 +1,5 @@
 #include "ble_client.h"
+#include "utils.h"
 #include <NimBLEDevice.h>
 #include <vector>
 #include <algorithm>
@@ -63,22 +64,6 @@ bool ble_client_is_scanning() {
     return isScanningFlag || NimBLEDevice::getScan()->isScanning();
 }
 
-static String escapeJsonString(const String& input) {
-    String output = "";
-    for (size_t i = 0; i < input.length(); i++) {
-        char c = input[i];
-        if (c == '"') output += "\\\"";
-        else if (c == '\\') output += "\\\\";
-        else if (c == '\b') output += "\\b";
-        else if (c == '\f') output += "\\f";
-        else if (c == '\n') output += "\\n";
-        else if (c == '\r') output += "\\r";
-        else if (c == '\t') output += "\\t";
-        else if (c >= 32 && c <= 126) output += c;
-    }
-    return output;
-}
-
 struct DiscoveredDevice {
     String name;
     String mac;
@@ -136,7 +121,7 @@ String ble_client_get_scan_results_json() {
     String json = "[";
     for (size_t i = 0; i < devices.size(); i++) {
         if (i > 0) json += ",";
-        json += "{\"name\":\"" + escapeJsonString(devices[i].name) + "\",";
+        json += "{\"name\":\"" + utils_escape_json(devices[i].name) + "\",";
         json += "\"mac\":\"" + devices[i].mac + "\",";
         json += "\"rssi\":" + String(devices[i].rssi) + "}";
     }

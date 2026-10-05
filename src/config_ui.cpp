@@ -1,5 +1,6 @@
 #include "config_ui.h"
 #include "ble_client.h"
+#include "wifi_net.h"
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 
@@ -35,6 +36,8 @@ const char index_html[] PROGMEM = R"rawliteral(
   .btn-success { background-color: #28a745; color: white; }
   .btn-secondary { background-color: #e4e6eb; color: #1c1e21; }
   .btn-warning { background-color: #ff9800; color: white; }
+  .btn-danger { background-color: #dc3545; color: white; margin-top: 8px; }
+  .btn-danger:hover { background-color: #c82333; }
   .btn-edit { width: auto; padding: 6px 16px; font-size: 13px; margin: 0; background-color: #0066cc; color: white; border-radius: 6px; font-weight: 600; }
   .btn-edit:hover { background-color: #0052a3; opacity: 1; }
   .btn-group { display: flex; gap: 8px; margin-top: 8px; }
@@ -46,6 +49,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   .alert { display: none; padding: 10px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
   .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
   .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  .alert-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
   .alert-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 </style>
 </head>
@@ -69,6 +73,13 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
     </div>
     <div id="wifi-edit" style="display:none;">
+      <label>Discovered Networks:</label>
+      <div id="wifi-scan-status" class="spinner">Scanning for WiFi networks...</div>
+      <select id="select-wifi-ssid" onchange="onWifiNetworkSelected()">
+        <option value="">-- Select or scan below --</option>
+      </select>
+      <button type="button" id="btn-scan-wifi" class="btn-secondary" onclick="scanWifi()">🔍 Scan for Networks</button>
+
       <label>WiFi SSID:</label>
       <input type="text" id="input-wifi-ssid" placeholder="Network Name">
       <label>WiFi Password:</label>
@@ -133,11 +144,25 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div id="reboot-alert" class="alert"></div>
     <button class="btn-primary" id="btn-reboot" onclick="rebootBridge()">Reboot & Start Bridge</button>
+    <button class="btn-danger" id="btn-reset" onclick="resetBridge()">Reset All Settings</button>
+  </div>
+
+  <!-- Custom In-DOM Modal for Captive Portal compatibility (macOS/iOS CNA) -->
+  <div id="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.55); z-index:9999; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:white; padding:22px; border-radius:12px; max-width:380px; width:100%; box-shadow:0 8px 24px rgba(0,0,0,0.25); text-align:center;">
+      <h3 id="modal-title" style="margin-top:0; font-size:18px; color:#1a1a1a;">Confirm Action</h3>
+      <p id="modal-msg" style="font-size:14px; color:#444; margin:14px 0 20px; line-height:1.45;"></p>
+      <div class="btn-group">
+        <button id="modal-btn-confirm" class="btn-primary" style="margin:0;">Confirm</button>
+        <button class="btn-secondary" style="margin:0;" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script>
     let currentConfig = { wifi_ssid: '', wifi_has_pass: false, ble_mac: '', ble_pin: '' };
     let pollInterval = null;
+    let wifiPollInterval = null;
 
     function showAlert(id, type, msg) {
       const el = document.getElementById(id);
@@ -192,6 +217,95 @@ const char index_html[] PROGMEM = R"rawliteral(
       document.getElementById('wifi-edit').style.display = edit ? 'block' : 'none';
       document.getElementById('btn-edit-wifi').style.display = edit ? 'none' : 'block';
       hideAlert('wifi-alert');
+      if (edit) {
+        scanWifi();
+      } else if (wifiPollInterval) {
+        clearInterval(wifiPollInterval);
+        wifiPollInterval = null;
+      }
+    }
+
+    function onWifiNetworkSelected() {
+      const select = document.getElementById('select-wifi-ssid');
+      const opt = select.options[select.selectedIndex];
+      if (opt && opt.value) {
+        document.getElementById('input-wifi-ssid').value = opt.value;
+      }
+    }
+
+    let wifiScanInFlight = false;
+
+    function scanWifi() {
+      const select = document.getElementById('select-wifi-ssid');
+      const status = document.getElementById('wifi-scan-status');
+      const btnScan = document.getElementById('btn-scan-wifi');
+      const btnSave = document.getElementById('btn-save-wifi');
+
+      if (wifiPollInterval) {
+        clearInterval(wifiPollInterval);
+        wifiPollInterval = null;
+      }
+      wifiScanInFlight = false;
+
+      // Disable scan and save while scanning is active
+      btnScan.disabled = true;
+      btnSave.disabled = true;
+
+      select.innerHTML = '<option value="">-- Scan in progress... --</option>';
+      status.innerText = 'Scanning for WiFi networks...';
+      status.style.display = 'block';
+
+      fetch('/start_scan_wifi')
+        .then(() => {
+          wifiPollInterval = setInterval(() => {
+            if (wifiScanInFlight) return;
+            wifiScanInFlight = true;
+
+            fetch('/scan_wifi_results')
+              .then(r => r.json())
+              .then(data => {
+                wifiScanInFlight = false;
+                if (data.status === 'done') {
+                  clearInterval(wifiPollInterval);
+                  wifiPollInterval = null;
+
+                  btnScan.disabled = false;
+                  btnSave.disabled = false;
+                  status.style.display = 'none';
+
+                  select.innerHTML = '<option value="">-- Select Discovered Network --</option>';
+                  if (!data.networks || data.networks.length === 0) {
+                    status.innerText = 'No WiFi networks found.';
+                    status.style.display = 'block';
+                  } else {
+                    data.networks.forEach(net => {
+                      const opt = document.createElement('option');
+                      opt.value = net.ssid;
+                      const lockStr = net.is_open ? ' 🔓' : ' 🔒';
+                      const rssiStr = (net.rssi !== undefined) ? ' [' + net.rssi + ' dBm]' : '';
+                      opt.textContent = net.ssid + rssiStr + lockStr;
+                      select.appendChild(opt);
+                    });
+                  }
+                }
+              })
+              .catch(() => {
+                wifiScanInFlight = false;
+                clearInterval(wifiPollInterval);
+                wifiPollInterval = null;
+                btnScan.disabled = false;
+                btnSave.disabled = false;
+                status.innerText = 'Error checking WiFi scan status.';
+                status.style.display = 'block';
+              });
+          }, 800);
+        })
+        .catch(() => {
+          btnScan.disabled = false;
+          btnSave.disabled = false;
+          status.innerText = 'Error initiating WiFi scan.';
+          status.style.display = 'block';
+        });
     }
 
     function toggleEditBle(edit) {
@@ -435,17 +549,68 @@ const char index_html[] PROGMEM = R"rawliteral(
       });
     }
 
-    function rebootBridge() {
-      if (!confirm('Reboot now and start the bridge in normal mode?')) return;
-      
-      const btn = document.getElementById('btn-reboot');
-      btn.disabled = true;
-      showAlert('reboot-alert', 'info', 'Bridge is rebooting... Connect to your local WiFi to use.');
+    let modalConfirmCallback = null;
 
-      fetch('/reboot', { method: 'POST' });
+    function showModal(title, msg, btnText, btnClass, onConfirm) {
+      document.getElementById('modal-title').innerText = title;
+      document.getElementById('modal-msg').innerText = msg;
+      const btn = document.getElementById('modal-btn-confirm');
+      btn.innerText = btnText;
+      btn.className = btnClass;
+      modalConfirmCallback = onConfirm;
+      document.getElementById('modal-overlay').style.display = 'flex';
     }
 
-    window.onload = loadConfig;
+    function closeModal() {
+      document.getElementById('modal-overlay').style.display = 'none';
+      modalConfirmCallback = null;
+    }
+
+    function confirmModalAction() {
+      if (modalConfirmCallback) {
+        modalConfirmCallback();
+      }
+      closeModal();
+    }
+
+    function rebootBridge() {
+      showModal(
+        'Reboot Bridge',
+        'Are you sure you want to reboot the bridge and start in normal mode?',
+        'Reboot Now',
+        'btn-primary',
+        function() {
+          const btnReboot = document.getElementById('btn-reboot');
+          const btnReset = document.getElementById('btn-reset');
+          btnReboot.disabled = true;
+          btnReset.disabled = true;
+          showAlert('reboot-alert', 'info', 'Bridge is rebooting... Connect to your local WiFi to use.');
+          fetch('/reboot', { method: 'POST' });
+        }
+      );
+    }
+
+    function resetBridge() {
+      showModal(
+        'Reset All Settings',
+        'Are you sure you want to erase all saved settings? This will restore factory defaults and restart in setup mode.',
+        'Reset & Erase',
+        'btn-danger',
+        function() {
+          const btnReset = document.getElementById('btn-reset');
+          const btnReboot = document.getElementById('btn-reboot');
+          btnReset.disabled = true;
+          btnReboot.disabled = true;
+          showAlert('reboot-alert', 'warning', 'All settings erased. Rebooting into Setup Mode...');
+          fetch('/reset', { method: 'POST' });
+        }
+      );
+    }
+
+    window.onload = function() {
+      document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
+      loadConfig();
+    };
   </script>
 </body>
 </html>
@@ -482,6 +647,22 @@ void config_ui_start_server() {
         json += "\"ble_pin\":\"" + cfg.ble_pin + "\"";
         json += "}";
         request->send(200, "application/json", json);
+    });
+
+    // Trigger the WiFi scan asynchronously
+    server.on("/start_scan_wifi", HTTP_GET, [](AsyncWebServerRequest *request){
+        wifi_net_start_scan();
+        request->send(200, "application/json", "{\"status\": \"started\"}");
+    });
+    
+    // Poll for WiFi scan results
+    server.on("/scan_wifi_results", HTTP_GET, [](AsyncWebServerRequest *request){
+        if (wifi_net_is_scanning()) {
+            request->send(200, "application/json", "{\"status\": \"scanning\"}");
+        } else {
+            String jsonResults = wifi_net_get_scan_results_json();
+            request->send(200, "application/json", "{\"status\": \"done\", \"networks\": " + jsonResults + "}");
+        }
     });
     
     // Trigger the BLE scan asynchronously
@@ -566,6 +747,14 @@ void config_ui_start_server() {
     // Reboot system
     server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request){
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting bridge...\"}");
+        delay(1000);
+        ESP.restart();
+    });
+
+    // Reset all settings and reboot
+    server.on("/reset", HTTP_POST, [](AsyncWebServerRequest *request){
+        preferences.clear();
+        request->send(200, "application/json", "{\"success\":true,\"message\":\"Settings erased. Rebooting...\"}");
         delay(1000);
         ESP.restart();
     });
