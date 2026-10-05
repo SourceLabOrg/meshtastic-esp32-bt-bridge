@@ -94,7 +94,10 @@ String wifi_net_get_scan_results_json() {
     return cachedWifiResultsJson;
 }
 
+#include "status_led.h"
+
 void wifi_net_start_ap() {
+    status_led_set(LED_SLOW_BLINK);
     Serial.println("Starting AP Mode: Meshtastic-Bridge-Setup");
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP("Meshtastic-Bridge-Setup");
@@ -136,6 +139,7 @@ void wifi_net_init() {
     
     Serial.println("\n==========================================");
     Serial.println("[BOOT] Mode: Normal Operating Mode");
+    status_led_set(LED_MED_BLINK);
     Serial.printf("[BOOT] Target WiFi: %s\n", cfg.wifi_ssid.c_str());
     if (cfg.ble_mac.length() > 0) {
         Serial.printf("[BOOT] Target BLE:  %s (%s)\n", cfg.ble_name.c_str(), cfg.ble_mac.c_str());

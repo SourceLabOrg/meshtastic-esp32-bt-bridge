@@ -3,6 +3,7 @@
 #include <AsyncTCP.h>
 #include <NimBLEDevice.h>
 #include "config_ui.h" // for bridge config if needed
+#include "status_led.h"
 
 #define TCP_PORT 4403
 #define MAX_TCP_CLIENTS 3
@@ -183,6 +184,7 @@ static void bridgeBleTask(void* parameter) {
     
     while (bridgeRunning) {
         if (!bleClient || !bleClient->isConnected()) {
+            status_led_set(LED_MED_BLINK);
             Serial.println("[Bridge] Attempting to connect to Meshtastic BLE device...");
             
             NimBLEAddress addr(targetBleMac.c_str());
@@ -222,6 +224,7 @@ static void bridgeBleTask(void* parameter) {
                         DBG_PRINTF("[Bridge-BLE] Subscribed to FromRadio: %d\n", sub);
                     }
                     Serial.println("[Bridge] BLE setup complete. Bridging active.");
+                    status_led_set(LED_SOLID_ON);
                 } else {
                     Serial.println("[Bridge] Meshtastic service not found!");
                     bleClient->disconnect();
