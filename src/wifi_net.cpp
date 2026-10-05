@@ -1,9 +1,13 @@
 #include "wifi_net.h"
 #include "config_ui.h"
+#include "bridge.h"
 #include "utils.h"
 #include <WiFi.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <vector>
+
+#define MDNS_HOSTNAME "meshtastic-bridge"
 #include <algorithm>
 
 // GPIO 0 is the physical "BOOT" button on most ESP32 boards
@@ -170,8 +174,32 @@ void wifi_net_init() {
         Serial.println(WiFi.localIP());
         Serial.printf("[BOOT] Web UI available at: http://%s/\n", WiFi.localIP().toString().c_str());
         
+        if (MDNS.begin(MDNS_HOSTNAME)) {
+            MDNS.setInstanceName(MDNS_HOSTNAME);
+            MDNS.addService("meshtastic", "tcp", 4403);
+            
+            // Add required TXT records so the Meshtastic Apps can parse the name and identity
+            MDNS.addServiceTxt("meshtastic", "tcp", "name", MDNS_HOSTNAME);
+            
+            String mac = WiFi.macAddress();
+            mac.replace(":", "");
+            MDNS.addServiceTxt("meshtastic", "tcp", "mac", mac);
+            
+            // Fake a node ID using the MAC address (Node IDs start with '!')
+            String nodeId = "!" + mac.substring(4);
+            MDNS.addServiceTxt("meshtastic", "tcp", "id", nodeId);
+            
+            Serial.printf("[BOOT] mDNS auto-discovery started (%s.local)\n", MDNS_HOSTNAME);
+        }
+
         // Start web server so settings can also be accessed on local network
         config_ui_start_server();
+        
+        // Start the BLE-to-TCP bridge
+        if (!cfg.ble_mac.isEmpty()) {
+            bridge_init(cfg.ble_mac);
+            bridge_start();
+        }
     } else {
         Serial.println("\n[BOOT] WiFi Connection Failed! Falling back to Setup / Configuration Mode.");
         wifi_net_start_ap();
