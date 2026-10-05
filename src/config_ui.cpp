@@ -1,11 +1,7 @@
 #include "config_ui.h"
+#include "ble_client.h"
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
-
-// Forward declarations for BLE scan functions (to be implemented in ble_client)
-extern void ble_client_start_scan();
-extern bool ble_client_is_scanning();
-extern String ble_client_get_scan_results_json();
 
 Preferences preferences;
 AsyncWebServer server(80);
@@ -42,11 +38,11 @@ const char index_html[] PROGMEM = R"rawliteral(
       <input type="password" name="pass">
       
       <label>Target BLE Device:</label>
-      <div id="scan-status" class="spinner">Scanning for Bluetooth devices...</div>
+      <div id="scan-status" class="spinner">Scanning for Bluetooth devices (4 seconds)...</div>
       <select name="ble_mac" id="ble_mac" required>
         <option value="">-- Select Device --</option>
       </select>
-      <button type="button" class="btn-scan" onclick="scanBle()">Scan for Devices</button>
+      <button type="button" id="btn-scan" class="btn-scan" onclick="scanBle()">Scan for Devices</button>
       
       <label>BLE PIN (6-digit):</label>
       <input type="number" name="ble_pin" min="0" max="999999" required>
@@ -56,43 +52,77 @@ const char index_html[] PROGMEM = R"rawliteral(
   </div>
   
   <script>
+    let pollInterval = null;
+    
     function scanBle() {
       const select = document.getElementById('ble_mac');
       const status = document.getElementById('scan-status');
+      const btn = document.getElementById('btn-scan');
       
-      select.innerHTML = '<option value="">-- Select Device --</option>';
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btn.innerText = 'Scanning...';
+      
+      select.innerHTML = '<option value="">-- Scanning in progress --</option>';
+      status.innerText = 'Scanning for Bluetooth devices (4 seconds)...';
       status.style.display = 'block';
       
       // Start the scan
-      fetch('/start_scan').then(() => {
-        // Poll for results
-        let pollInterval = setInterval(() => {
-          fetch('/scan_results')
-            .then(r => r.json())
-            .then(data => {
-              if (data.status === 'done') {
-                clearInterval(pollInterval);
-                status.style.display = 'none';
-                
-                if (data.devices.length === 0) {
-                    status.innerHTML = "No devices found.";
+      fetch('/start_scan')
+        .then(() => {
+          pollInterval = setInterval(() => {
+            fetch('/scan_results')
+              .then(r => r.json())
+              .then(data => {
+                if (data.status === 'done') {
+                  clearInterval(pollInterval);
+                  pollInterval = null;
+                  
+                  btn.disabled = false;
+                  btn.style.opacity = '1';
+                  btn.innerText = 'Scan for Devices';
+                  status.style.display = 'none';
+                  
+                  select.innerHTML = '<option value="">-- Select Device --</option>';
+                  
+                  if (!data.devices || data.devices.length === 0) {
+                    status.innerText = 'No devices found.';
                     status.style.display = 'block';
-                } else {
+                  } else {
                     data.devices.forEach(device => {
                       const opt = document.createElement('option');
                       opt.value = device.mac;
-                      opt.innerHTML = (device.name ? device.name : 'Unknown') + ' (' + device.mac + ')';
+                      const nameStr = device.name ? device.name : 'Unknown';
+                      const rssiStr = (device.rssi !== undefined) ? ' [' + device.rssi + ' dBm]' : '';
+                      opt.textContent = nameStr + ' (' + device.mac + ')' + rssiStr;
                       select.appendChild(opt);
                     });
+                  }
                 }
-              }
-            }).catch(e => {
+              })
+              .catch(e => {
                 clearInterval(pollInterval);
-                status.innerHTML = "Error checking scan status.";
+                pollInterval = null;
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerText = 'Scan for Devices';
+                status.innerText = 'Error checking scan status.';
                 status.style.display = 'block';
-            });
-        }, 1000);
-      });
+              });
+          }, 800);
+        })
+        .catch(e => {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.innerText = 'Scan for Devices';
+          status.innerText = 'Error initiating BLE scan.';
+          status.style.display = 'block';
+        });
     }
     
     // Auto scan on load
@@ -118,7 +148,7 @@ BridgeConfig config_ui_load() {
 void config_ui_start_server() {
     // 1. Serve the main HTML page
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send_P(200, "text/html", index_html);
+        request->send(200, "text/html", index_html);
     });
     
     // 2. Trigger the BLE scan asynchronously

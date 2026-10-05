@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "config_ui.h"
 #include "wifi_net.h"
+#include "ble_client.h"
 
 void setup() {
     Serial.begin(115200);
@@ -9,6 +10,7 @@ void setup() {
     Serial.println("\n--- Starting Meshtastic ESP32 BT-TCP Bridge ---");
     
     config_ui_init();
+    ble_client_init();
     wifi_net_init();
 }
 
