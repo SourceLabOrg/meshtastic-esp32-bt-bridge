@@ -72,8 +72,13 @@ bool wifi_net_is_scanning() {
             return a.rssi > b.rssi;
         });
         
-        String json = "[";
-        for (size_t i = 0; i < networks.size(); i++) {
+        // Strictly limit to the top 30 strongest networks to protect RAM
+        size_t max_results = min(networks.size(), (size_t)30);
+        
+        String json;
+        json.reserve(max_results * 64);
+        json = "[";
+        for (size_t i = 0; i < max_results; i++) {
             if (i > 0) json += ",";
             json += "{\"ssid\":\"" + utils_escape_json(networks[i].ssid) + "\",";
             json += "\"rssi\":" + String(networks[i].rssi) + ",";

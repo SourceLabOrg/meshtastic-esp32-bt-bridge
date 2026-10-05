@@ -118,8 +118,13 @@ String ble_client_get_scan_results_json() {
         return a.rssi > b.rssi;
     });
     
-    String json = "[";
-    for (size_t i = 0; i < devices.size(); i++) {
+    // Strictly limit to the top 30 strongest/named devices to protect RAM
+    size_t max_results = min(devices.size(), (size_t)30);
+    
+    String json;
+    json.reserve(max_results * 80);
+    json = "[";
+    for (size_t i = 0; i < max_results; i++) {
         if (i > 0) json += ",";
         json += "{\"name\":\"" + utils_escape_json(devices[i].name) + "\",";
         json += "\"mac\":\"" + devices[i].mac + "\",";

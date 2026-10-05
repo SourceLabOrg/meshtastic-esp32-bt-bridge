@@ -70,6 +70,13 @@ static void onClientConnected(void* arg, AsyncClient* client) {
         
         DBG_PRINTF("[Bridge-TCP] RX %zu bytes from %s\n", len, c->remoteIP().toString().c_str());
         
+        // Protect against OOM (e.g., malicious stream or massive desync)
+        if (ctx->rx_buffer.size() + len > 2048) {
+            Serial.println("[Bridge-TCP] ERROR: RX Buffer overflow! Disconnecting client to prevent OOM.");
+            c->close();
+            return;
+        }
+        
         // Append new data to client's RX buffer
         ctx->rx_buffer.insert(ctx->rx_buffer.end(), buf, buf + len);
         
