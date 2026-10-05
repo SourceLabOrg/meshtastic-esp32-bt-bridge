@@ -5,6 +5,7 @@
 struct BridgeConfig {
     String wifi_ssid;
     String wifi_pass;
+    String ble_name;
     String ble_mac;
     String ble_pin;
 };

@@ -1,38 +1,63 @@
 # Configuration UI Design (Captive Portal)
 
 ## Overview
-To provide a seamless setup experience without requiring hard-coded credentials, the ESP32 bridge implements a Captive Portal. This allows the user to connect to the ESP32's own WiFi network and configure both the local network (WiFi) and the target Bluetooth (BLE) settings from a mobile device or laptop.
+To provide a seamless setup experience without requiring hard-coded credentials, the ESP32 bridge implements a Captive Portal. This allows the user to connect to the ESP32's own WiFi network and configure both the local network (WiFi) and the target Bluetooth (BLE) settings from a mobile device or laptop browser.
 
-## Design Requirements
-1. **Fallback & Manual Trigger**: 
-   - If the ESP32 fails to connect to the configured WiFi, it should automatically fallback to Access Point (AP) mode.
-   - The user must be able to force AP mode manually by holding down a physical button (e.g., the `BOOT` button on GPIO 0) during startup.
-2. **Unified Configuration Form**: A single web page must handle all settings:
-   - WiFi SSID
-   - WiFi Password
-   - Target BLE Device (Selected from a dropdown)
-   - BLE PIN code (6-digit)
-3. **Active BLE Scanning**: The web interface must present a live list of discovered BLE devices.
-   - We will not filter by Meshtastic UUID; all discovered BLE devices will be shown to ensure maximum flexibility and reliability.
-   - The dropdown list will display the BLE Local Name (e.g., `Meshtastic_1234`) alongside the MAC Address to help the user identify their specific radio.
+The UI is built with a clean, modular card-based interface that allows inspecting current settings, updating WiFi and Bluetooth parameters independently, scanning for nearby BLE devices, and verifying live BLE connectivity and PIN pairing before rebooting into normal bridge mode.
 
-## System Workflow
+## User Interface & Features
+
+### 1. Modular Card Design
+* **WiFi Network Card:**
+  * Displays the current configured SSID and masked password status.
+  * In Edit mode, provides fields for SSID and Password with a **Show/Hide** toggle to unmask the password.
+  * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
+* **Bluetooth Target Card:**
+  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed) and masked PIN.
+  * In Edit mode, offers a live scan dropdown with RSSI signal strengths, manual MAC entry, and 6-digit PIN input.
+  * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
+  * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
+* **System Actions Card:**
+  * Contains a prominent **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
+
+### 2. Live BLE Scanning
+* Initiated via **🔍 Scan for Devices** (or automatically when expanding BLE edit mode).
+* Runs an active 4-second BLE scan with duplicate filtering.
+* Discovered devices are sorted with named devices first, ordered by signal strength (RSSI in dBm).
+* UI displays `-- Scan in progress... --` and disables scan/test/save buttons during the scan to avoid radio contention.
+
+### 3. Live Connection & PIN Verification
+* Clicking **⚡ Test Connection** connects to the specified MAC address and authenticates with the provided 6-digit PIN.
+* **Passkey Security & Bond Clearing:** Clears any existing bond (`deleteBond`) before and after the test to ensure that the PIN is genuinely challenged and validated on every test run.
+* **Service & Characteristic Check:** Confirms the presence of the Meshtastic Service UUID (`6ba1b218-15a8-461f-9fa8-5dcae273eafd` or `cb0b9a0b-a8c2-49c0-bdd5-3fa12b04d84b`) and required `ToRadio` / `FromRadio` characteristics.
+* **Non-Blocking Execution:** Runs in a dedicated FreeRTOS background task on Core 1 to ensure the asynchronous web server on Core 0 remains completely responsive.
+
+## System Workflow & Endpoints
+
 1. **AP Mode Initialization (`wifi_net.cpp`)**:
-   - The ESP32 starts its own WiFi AP (e.g., `Meshtastic-Bridge-Setup`).
-   - A `DNSServer` intercepts all DNS requests and resolves them to the ESP32's IP (`192.168.4.1`), triggering the OS-level "Sign in to network" captive portal prompt on the user's device.
-2. **Web Server (`config_ui.cpp`)**:
-   - `ESPAsyncWebServer` listens on port 80.
-   - **`GET /`**: Returns the HTML form (embedded as a PROGMEM string in the C++ code).
-   - **`GET /scan_ble`**: When the HTML UI loads, JavaScript makes an asynchronous request to this endpoint. The ESP32 temporarily activates the `NimBLE` client, performs an active BLE scan for ~3-5 seconds, and returns a JSON array: `[{"name": "Meshtastic_xxxx", "mac": "AA:BB:CC..."}]`.
-   - **`POST /save`**: The HTML form submits data to this endpoint. The ESP32 parses the URL-encoded parameters, saves them to NVS via the `Preferences` library, displays a success page, and initiates a system restart to apply the settings.
+   * The ESP32 starts an open WiFi AP (`Meshtastic-Bridge-Setup` at `192.168.4.1`).
+   * A `DNSServer` intercepts DNS queries and redirects captive portal clients to `http://192.168.4.1/`.
+
+2. **Web Server Endpoints (`config_ui.cpp`)**:
+   * **`GET /`**: Serves the single-page HTML/CSS/JS application with explicit UTF-8 encoding.
+   * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"..."}`.
+   * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.
+   * **`GET /scan_results`**: Polls scan progress and returns JSON array of discovered devices: `[{"name":"Meshtastic_xxxx","mac":"AA:BB:CC:DD:EE:FF","rssi":-68}]`.
+   * **`POST /start_test_ble`**: Launches a background FreeRTOS task to test BLE pairing and GATT service discovery for the given MAC and PIN.
+   * **`GET /test_ble_status`**: Polls the test task state and returns result JSON (`{"status":"done","success":true,"message":"..."}`).
+   * **`POST /save_wifi`**: Saves `wifi_ssid` and `wifi_pass` to NVS.
+   * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS.
+   * **`POST /reboot`**: Restarts the ESP32 into normal bridge mode.
+   * **`POST /save`**: Full-form save endpoint for backward compatibility.
 
 ## Memory & Non-Volatile Storage (NVS)
-The following keys are stored in the `Preferences` namespace (e.g., `bridge_cfg`):
+The following keys are stored in the `Preferences` namespace (`bridge_cfg`):
 * `wifi_ssid` (String)
 * `wifi_pass` (String)
+* `ble_name` (String)
 * `ble_mac` (String)
 * `ble_pin` (String)
 
 ## Technical Decisions & Considerations
-* **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for both WiFi and Bluetooth. We use `ESPAsyncWebServer` because standard synchronous web servers can block the CPU and cause WiFi/BLE tasks to drop packets or timeout. The `/scan_ble` background fetch ensures the web UI doesn't hang while the ESP32 changes radio contexts to scan for Bluetooth.
-* **NimBLE Stack:** We chose `NimBLE-Arduino` for BLE scanning and client connections because it uses significantly less RAM than the standard ESP32 Bluedroid stack. This is absolutely critical when running a Web Server, WiFi AP, and BLE stack simultaneously without exhausting the ESP32's heap memory.
+* **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for WiFi and Bluetooth. Using `ESPAsyncWebServer` combined with asynchronous background tasks for BLE operations prevents HTTP request timeouts and prevents radio collisions while switching between WiFi AP and BLE scanning/testing.
+* **NimBLE Stack:** `NimBLE-Arduino` provides low memory footprint BLE client capabilities, essential for coexisting with `ESPAsyncWebServer` and `WiFi` on resource-constrained ESP32-S3 boards without heap exhaustion.

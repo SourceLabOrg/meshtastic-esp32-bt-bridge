@@ -144,3 +144,194 @@ String ble_client_get_scan_results_json() {
     
     return json;
 }
+
+static uint32_t activePasskey = 123456;
+static bool isTestingFlag = false;
+static BleTestResult lastTestResult = {false, "", ""};
+
+class BridgeClientCallbacks : public NimBLEClientCallbacks {
+public:
+    bool passkeyPrompted = false;
+    bool authCompleted = false;
+    bool authFailed = false;
+
+    void reset() {
+        passkeyPrompted = false;
+        authCompleted = false;
+        authFailed = false;
+    }
+
+    uint32_t onPassKeyRequest() override {
+        passkeyPrompted = true;
+        Serial.printf("[BLE] Passkey requested by server, providing PIN: %06u\n", activePasskey);
+        return activePasskey;
+    }
+    
+    bool onConfirmPIN(uint32_t pin) override {
+        passkeyPrompted = true;
+        Serial.printf("[BLE] Confirming PIN: %06u\n", pin);
+        return (pin == activePasskey);
+    }
+    
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+        authCompleted = true;
+        authFailed = !desc->sec_state.encrypted;
+        Serial.printf("[BLE] Authentication complete. Encrypted: %d, Authenticated: %d, Bonded: %d\n",
+                      desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded);
+    }
+};
+
+static BridgeClientCallbacks bridgeCallbacks;
+
+BleTestResult ble_client_test_connection(const String& macStr, const String& pinStr) {
+    if (!isInitialized) {
+        ble_client_init();
+    }
+    
+    // Stop any active scan first
+    ble_client_stop_scan();
+    
+    if (macStr.isEmpty()) {
+        return {false, "No MAC address provided.", ""};
+    }
+    
+    activePasskey = pinStr.toInt();
+    bridgeCallbacks.reset();
+    
+    Serial.printf("[BLE Test] Attempting test connection to %s with PIN %06u...\n", macStr.c_str(), activePasskey);
+    
+    NimBLEAddress addr(macStr.c_str());
+    
+    // Always delete existing bonding data so the PIN is genuinely challenged every test
+    NimBLEDevice::deleteBond(addr);
+    
+    // Set security configuration for PIN authentication
+    NimBLEDevice::setSecurityAuth(true, true, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_ONLY);
+    
+    NimBLEClient* pClient = NimBLEDevice::createClient();
+    if (!pClient) {
+        return {false, "Failed to create BLE Client instance (out of memory).", ""};
+    }
+    
+    pClient->setClientCallbacks(&bridgeCallbacks, false);
+    pClient->setConnectTimeout(6); // 6 seconds timeout
+    
+    Serial.println("[BLE Test] Connecting to peripheral...");
+    bool connected = pClient->connect(addr, false);
+    if (!connected) {
+        Serial.println("[BLE Test] Connection failed or timed out.");
+        NimBLEDevice::deleteClient(pClient);
+        NimBLEDevice::deleteBond(addr);
+        return {false, "Could not connect to BLE device. Ensure it is powered on and within range.", ""};
+    }
+    
+    Serial.println("[BLE Test] Connected. Requesting secure pairing...");
+    pClient->secureConnection();
+    
+    // Wait up to 6 seconds for authentication handshake to complete
+    unsigned long startAuth = millis();
+    while (millis() - startAuth < 6000) {
+        if (!pClient->isConnected() || bridgeCallbacks.authFailed) {
+            break;
+        }
+        if (bridgeCallbacks.authCompleted) {
+            break;
+        }
+        delay(100);
+    }
+    
+    bool isAuth = pClient->isConnected() && bridgeCallbacks.authCompleted && !bridgeCallbacks.authFailed;
+    if (isAuth) {
+        NimBLEConnInfo connInfo = pClient->getConnInfo();
+        isAuth = connInfo.isEncrypted() || connInfo.isAuthenticated();
+    }
+    
+    if (!isAuth) {
+        Serial.printf("[BLE Test] Pairing/Auth rejected: connected=%d, authCompleted=%d, authFailed=%d\n",
+                      pClient->isConnected(),
+                      bridgeCallbacks.authCompleted,
+                      bridgeCallbacks.authFailed);
+        pClient->disconnect();
+        NimBLEDevice::deleteClient(pClient);
+        NimBLEDevice::deleteBond(addr);
+        return {false, "Pairing rejected by Meshtastic radio. The 6-digit PIN is incorrect.", ""};
+    }
+    
+    Serial.printf("[BLE Test] Auth verified (Encrypted: %d, Authenticated: %d). Discovering services...\n",
+                  pClient->getConnInfo().isEncrypted(), pClient->getConnInfo().isAuthenticated());
+    // Check for Meshtastic Service
+    NimBLERemoteService* pSvc = pClient->getService("6ba1b218-15a8-461f-9fa8-5dcae273eafd");
+    if (!pSvc) {
+        pSvc = pClient->getService("cb0b9a0b-a8c2-49c0-bdd5-3fa12b04d84b");
+    }
+    
+    if (!pSvc) {
+        Serial.println("[BLE Test] Meshtastic Service UUID not found.");
+        pClient->disconnect();
+        NimBLEDevice::deleteClient(pClient);
+        NimBLEDevice::deleteBond(addr);
+        return {false, "Connected, but device does NOT provide the Meshtastic BLE Service.", ""};
+    }
+    
+    Serial.println("[BLE Test] Checking Meshtastic characteristics...");
+    // Check for ToRadio and FromRadio characteristics
+    NimBLERemoteCharacteristic* pFromRadio = pSvc->getCharacteristic("2c55e69e-4993-11ed-b878-0242ac120002");
+    if (!pFromRadio) {
+        pFromRadio = pSvc->getCharacteristic("e275fb98-3496-413f-9813-1b32525da4d9");
+    }
+    NimBLERemoteCharacteristic* pToRadio = pSvc->getCharacteristic("f75c76d2-129e-4dad-a1dd-7866124401e7");
+    
+    if (!pFromRadio || !pToRadio) {
+        Serial.println("[BLE Test] Required ToRadio/FromRadio characteristics missing.");
+        pClient->disconnect();
+        NimBLEDevice::deleteClient(pClient);
+        NimBLEDevice::deleteBond(addr);
+        return {false, "Meshtastic service found, but required ToRadio / FromRadio characteristics are missing.", ""};
+    }
+    
+    Serial.println("[BLE Test] Success! Disconnecting and clearing test bond.");
+    pClient->disconnect();
+    NimBLEDevice::deleteClient(pClient);
+    NimBLEDevice::deleteBond(addr);
+    
+    return {true, "Connected, paired, and verified Meshtastic radio service successfully!", ""};
+}
+
+struct TestTaskParams {
+    String mac;
+    String pin;
+};
+
+static void bleTestTask(void* parameter) {
+    TestTaskParams* params = (TestTaskParams*)parameter;
+    lastTestResult = ble_client_test_connection(params->mac, params->pin);
+    delete params;
+    isTestingFlag = false;
+    vTaskDelete(NULL);
+}
+
+void ble_client_start_test(const String& macStr, const String& pinStr) {
+    if (isTestingFlag) return;
+    isTestingFlag = true;
+    lastTestResult = {false, "Testing...", ""};
+    
+    TestTaskParams* params = new TestTaskParams{macStr, pinStr};
+    xTaskCreatePinnedToCore(
+        bleTestTask,
+        "ble_test",
+        4096,
+        params,
+        1,
+        NULL,
+        1 // Core 1
+    );
+}
+
+bool ble_client_is_testing() {
+    return isTestingFlag;
+}
+
+BleTestResult ble_client_get_test_result() {
+    return lastTestResult;
+}
