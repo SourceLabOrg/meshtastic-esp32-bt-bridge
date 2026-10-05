@@ -2,24 +2,15 @@
 
 ## Completed So Far
 *   **Architecture & Design:** Established the core plan (PlatformIO, Arduino Core, ESP32-S3 target).
-*   **Captive Portal (Config UI):** Implemented the asynchronous web server (`config_ui.cpp`) that serves a mobile-friendly setup page with independent cards for WiFi, Bluetooth Target, and System Actions.
-    *   Prominent edit buttons, password unmask toggles, and dynamic scanning/testing disabled states.
-    *   Stores and displays device name alongside MAC address: `Target Device: Name (AA:BB:CC:DD:EE:FF)`.
-*   **WiFi / Boot Logic:** Implemented `wifi_net.cpp` to check the physical `BOOT` button on startup, attempt to connect to saved WiFi, and fallback to the Captive Portal Access Point (`Meshtastic-Bridge-Setup`) if it fails.
-*   **BLE Scanning & Connection Verification (`ble_client.cpp`):**
-    *   Active BLE scanning (4s) with MAC deduplication, RSSI signal display, and device name extraction.
-    *   Non-blocking background testing task on Core 1 verifying PIN pairing and Meshtastic GATT services/characteristics.
-    *   Bond clearing before and after tests ensuring genuine passkey challenges.
+*   **Captive Portal (Config UI):** Implemented the asynchronous web server (`config_ui.cpp`).
+*   **WiFi / Boot Logic:** Implemented `wifi_net.cpp` (fallback to AP, mDNS broadcast).
+*   **BLE Scanning & Connection Verification (`ble_client.cpp`):** Active scanning, MAC deduplication, background testing.
+*   **Implement Normal Operation Mode BLE Connection (`ble_client.cpp`):** Handles connects, reconnects, and FromRadio/FromNum subscriptions.
+*   **Implement TCP Bridge (`bridge.cpp`):** TCP server on port 4403, bidirectional routing, dynamic fast-polling, identical packet deduplication, Nagle's algorithm batched transmissions, robust queue backpressure, Mutex protection for concurrent TCP disconnects, and stack-allocated TCP frames to prevent heap fragmentation.
 
-## Next Steps
-1.  **Implement Normal Operation Mode BLE Connection (`ble_client.cpp`):**
-    *   Connect to configured target MAC on boot when in normal mode.
-    *   Maintain active connection and handle automatic reconnects if signal is lost.
-    *   Subscribe to Meshtastic `FromRadio` notifications.
-2.  **Implement TCP Bridge (`bridge.cpp`):**
-    *   Start the TCP Server on port `4403`.
-    *   Read from TCP -> Write to Meshtastic `ToRadio` BLE Characteristic.
-    *   Read from Meshtastic `FromRadio` BLE Characteristic -> Write to TCP socket.
+## Next Steps: Code Review & Refactoring
+1.  **Queue Memory Optimization:** Replace `malloc()` inside `BridgePacket` with a statically sized `uint8_t data[512]` array to completely prevent heap fragmentation from rapid queue allocations, trading ~50KB of SRAM for flawless memory safety.
+2.  **Variable Cleanup:** Remove manual `connectedClientsCount` and rely on `tcpClients.size()` under the new Mutex lock. Refactor global target pin/mac variables to be passed cleanly into `bridge_init`.
 
 ## Hardware Note
 *   Target hardware is the **Seeed Studio XIAO ESP32S3**.

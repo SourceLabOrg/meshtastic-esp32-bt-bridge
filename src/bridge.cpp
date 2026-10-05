@@ -6,7 +6,7 @@
 
 #define TCP_PORT 4403
 #define MAX_TCP_CLIENTS 3
-#define BRIDGE_DEBUG 1
+#define BRIDGE_DEBUG 0
 
 #if BRIDGE_DEBUG
 #define DBG_PRINT(...) Serial.print(__VA_ARGS__)
@@ -36,6 +36,7 @@ struct ClientContext {
 
 static AsyncServer* tcpServer = NULL;
 static std::vector<ClientContext*> tcpClients;
+static SemaphoreHandle_t tcpClientsMutex = NULL; // Mutex to protect tcpClients vector from concurrent modification
 static std::atomic<size_t> connectedClientsCount{0};
 static bool bridgeRunning = false;
 static String targetBleMac = "";
@@ -62,8 +63,11 @@ static void onClientConnected(void* arg, AsyncClient* client) {
 
     ClientContext* ctx = new ClientContext();
     ctx->client = client;
-    tcpClients.push_back(ctx);
-    connectedClientsCount++;
+    if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
+        tcpClients.push_back(ctx);
+        connectedClientsCount++;
+        xSemaphoreGive(tcpClientsMutex);
+    }
 
     Serial.printf("[Bridge] TCP Client connected from %s. Total clients: %zu\n", client->remoteIP().toString().c_str(), connectedClientsCount.load());
 
@@ -120,11 +124,16 @@ static void onClientConnected(void* arg, AsyncClient* client) {
 
     client->onDisconnect([](void* arg, AsyncClient* c) {
         ClientContext* ctx = (ClientContext*)arg;
-        auto it = std::find(tcpClients.begin(), tcpClients.end(), ctx);
-        if (it != tcpClients.end()) {
-            tcpClients.erase(it);
+        
+        if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
+            auto it = std::find(tcpClients.begin(), tcpClients.end(), ctx);
+            if (it != tcpClients.end()) {
+                tcpClients.erase(it);
+            }
+            connectedClientsCount--;
+            xSemaphoreGive(tcpClientsMutex);
         }
-        connectedClientsCount--;
+
         Serial.printf("[Bridge] TCP Client disconnected. Total clients remaining: %zu\n", connectedClientsCount.load());
         delete ctx;
     }, ctx);
@@ -305,25 +314,31 @@ static void bridgeNetTask(void* parameter) {
             Serial.printf("[Bridge-Net] Broadcasting %zu bytes to %zu TCP clients\n", packet.len, connectedClientsCount.load());
             #endif
             // Build contiguous TCP frame to prevent fragmentation desyncs
+            // Build contiguous TCP frame to prevent fragmentation desyncs
             size_t frame_len = packet.len + 4;
-            uint8_t* frame = (uint8_t*)malloc(frame_len);
-            if (frame) {
+            uint8_t frame[516]; // Max Meshtastic packet is 512 bytes + 4 byte header
+            
+            if (frame_len <= sizeof(frame)) {
                 frame[0] = 0x94;
                 frame[1] = 0xC3;
                 frame[2] = (uint8_t)(packet.len >> 8);
                 frame[3] = (uint8_t)(packet.len & 0xFF);
                 memcpy(&frame[4], packet.data, packet.len);
                 
-                // Send to all connected clients
-                for (ClientContext* ctx : tcpClients) {
-                    if (ctx->client->space() >= frame_len) {
-                        ctx->client->write((const char*)frame, frame_len);
-                        ctx->client->send(); // Force immediate transmission
-                    } else {
-                        Serial.printf("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s\n", packet.len, ctx->client->remoteIP().toString().c_str());
+                // Send to all connected clients under mutex protection!
+                if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
+                    for (ClientContext* ctx : tcpClients) {
+                        if (ctx->client->space() >= frame_len) {
+                            ctx->client->write((const char*)frame, frame_len);
+                            ctx->client->send(); // Force immediate transmission
+                        } else {
+                            Serial.printf("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s\n", packet.len, ctx->client->remoteIP().toString().c_str());
+                        }
                     }
+                    xSemaphoreGive(tcpClientsMutex);
                 }
-                free(frame);
+            } else {
+                Serial.printf("[Bridge-Net] ERROR: Packet too large for frame buffer (%zu bytes)\n", packet.len);
             }
             free(packet.data);
         }
@@ -341,6 +356,8 @@ void bridge_init(const String& ble_mac) {
     // Massive queues to handle high-speed bursts of Meshtastic Node DB packets
     tcp_to_ble_queue = xQueueCreate(100, sizeof(BridgePacket));
     ble_to_tcp_queue = xQueueCreate(100, sizeof(BridgePacket));
+    
+    tcpClientsMutex = xSemaphoreCreateMutex();
     
     tcpServer = new AsyncServer(TCP_PORT);
     tcpServer->onClient(&onClientConnected, tcpServer);
