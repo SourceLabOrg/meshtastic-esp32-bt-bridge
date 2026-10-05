@@ -23,7 +23,7 @@ static QueueHandle_t tcp_to_ble_queue = NULL;
 static QueueHandle_t ble_to_tcp_queue = NULL;
 
 struct BridgePacket {
-    uint8_t* data;
+    uint8_t data[512]; // Max Meshtastic protobuf size
     size_t len;
 };
 
@@ -97,13 +97,13 @@ static void onClientConnected(void* arg, AsyncClient* client) {
                     DBG_PRINTF("[Bridge-TCP] Parsed frame: len %u\n", payload_len);
                     BridgePacket packet;
                     packet.len = payload_len;
-                    packet.data = (uint8_t*)malloc(payload_len);
-                    if (packet.data) {
+                    if (payload_len <= sizeof(packet.data)) {
                         memcpy(packet.data, &ctx->rx_buffer[processed + 4], payload_len);
-                        if (xQueueSend(tcp_to_ble_queue, &packet, 0) != pdTRUE) {
-                            free(packet.data);
-                            Serial.println("[Bridge] tcp_to_ble_queue full, dropped packet");
+                        if (xQueueSend(tcp_to_ble_queue, &packet, pdMS_TO_TICKS(100)) != pdTRUE) {
+                            Serial.println("[Bridge-TCP] WARNING: tcp_to_ble_queue full, dropped packet");
                         }
+                    } else {
+                        Serial.printf("[Bridge-TCP] ERROR: Payload too large (%u bytes)\n", payload_len);
                     }
                     processed += 4 + payload_len;
                 } else {
@@ -153,12 +153,13 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     if (length > 0) {
         BridgePacket packet;
         packet.len = length;
-        packet.data = (uint8_t*)malloc(length);
-        if (packet.data) {
+        if (length <= sizeof(packet.data)) {
             memcpy(packet.data, pData, length);
             if (xQueueSend(ble_to_tcp_queue, &packet, pdMS_TO_TICKS(50)) != pdTRUE) {
-                free(packet.data);
+                Serial.printf("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes from Notify\n", length);
             }
+        } else {
+            Serial.printf("[Bridge-BLE] ERROR: Notify Payload too large (%zu bytes)\n", length);
         }
     }
 }
@@ -254,7 +255,6 @@ static void bridgeBleTask(void* parameter) {
                     Serial.printf("[Bridge-BLE] Write success: %d\n", success);
                     #endif
                 }
-                free(packet.data);
             }
             
             static unsigned long lastFailsafe = 0;
@@ -281,14 +281,14 @@ static void bridgeBleTask(void* parameter) {
                         
                         BridgePacket rx_packet;
                         rx_packet.len = currentVal.length();
-                        rx_packet.data = (uint8_t*)malloc(rx_packet.len);
-                        if (rx_packet.data) {
+                        if (rx_packet.len <= sizeof(rx_packet.data)) {
                             memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
                             // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
                             if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
                                 Serial.printf("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes\n", rx_packet.len);
-                                free(rx_packet.data);
                             }
+                        } else {
+                            Serial.printf("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)\n", rx_packet.len);
                         }
                         
                         // We successfully pulled a NEW packet! There might be more packets 
@@ -340,18 +340,14 @@ static void bridgeNetTask(void* parameter) {
             } else {
                 Serial.printf("[Bridge-Net] ERROR: Packet too large for frame buffer (%zu bytes)\n", packet.len);
             }
-            free(packet.data);
         }
     }
     vTaskDelete(NULL);
 }
 
-void bridge_init(const String& ble_mac) {
+void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     targetBleMac = ble_mac;
-    
-    // Load configured PIN if needed
-    BridgeConfig cfg = config_ui_load();
-    targetBlePin = cfg.ble_pin.toInt();
+    targetBlePin = ble_pin;
 
     // Massive queues to handle high-speed bursts of Meshtastic Node DB packets
     tcp_to_ble_queue = xQueueCreate(100, sizeof(BridgePacket));

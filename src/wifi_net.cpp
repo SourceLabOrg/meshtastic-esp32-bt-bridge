@@ -197,7 +197,7 @@ void wifi_net_init() {
         
         // Start the BLE-to-TCP bridge
         if (!cfg.ble_mac.isEmpty()) {
-            bridge_init(cfg.ble_mac);
+            bridge_init(cfg.ble_mac, cfg.ble_pin.toInt());
             bridge_start();
         }
     } else {

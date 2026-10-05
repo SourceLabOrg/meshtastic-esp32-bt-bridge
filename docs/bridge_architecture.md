@@ -50,10 +50,10 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ### 4. Memory Management & Caching
 - The Python project implemented "Config Caching" to speed up reconnections. Given the limited RAM on the ESP32 and the complexity of parsing the protobufs to extract node DBs, we will **skip caching** for the initial C++ version. The ESP32 will act as a pure, dumb, fast bridge.
-- **Idle Optimization**: If there are 0 TCP clients connected, the BLE task will skip allocating heap memory and queueing packets when notifications arrive, preventing unnecessary heap fragmentation.
+- **Zero Heap Fragmentation**: To guarantee extreme long-term stability, the bridge does not use dynamic memory (`malloc`/`free`) for packet routing. `BridgePacket` uses a statically sized `uint8_t data[512]` array, and TCP frames are built in stack memory (`uint8_t frame[516]`). This safely trades a fixed ~50KB of SRAM for total immunity to heap fragmentation.
 
 ### 5. Client Limits & Auto-Discovery
-- **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's limited LwIP buffer memory and the small 10-packet FreeRTOS queues.
+- **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.
 - **mDNS Auto-Discovery**: The bridge runs an mDNS responder (`meshtastic-bridge.local`). It advertises the `_meshtastic._tcp` service on port 4403, and critically, includes the required TXT records (`name`, `mac`, `id`) so that official Meshtastic apps can instantly discover and properly display the bridge on the local network.
 
 ## Quirks & Potential Pitfalls to Watch Out For
