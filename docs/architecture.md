@@ -58,14 +58,18 @@ meshtastic-esp32-bt-bridge/
 │   └── devcontainer.json
 ├── docs/                  # Additional documentation
 │   ├── architecture.md    # System architecture
-│   └── configuration_ui.md# Captive portal design
+│   ├── bridge_architecture.md # Network & Bridge details
+│   ├── configuration_ui.md# Captive portal design
+│   ├── development.md     # Build guide
+│   └── user_guide.md      # End-user manual and LED reference
 ├── include/               # Header files
 ├── src/                   # C++ Source code
 │   ├── main.cpp           # Main application loop
 │   ├── bridge.cpp         # Logic for bridging TCP and BLE streams
 │   ├── ble_client.cpp     # NimBLE client and security callbacks
-│   ├── wifi_net.cpp       # WiFi and TCP server management
-│   └── config_ui.cpp      # Captive portal / Preferences logic
+│   ├── wifi_net.cpp       # WiFi, AP Mode, and mDNS management
+│   ├── config_ui.cpp      # Captive portal / Preferences logic
+│   └── status_led.cpp     # Asynchronous LED visual indicators
 └── platformio.ini         # PlatformIO build configurations
 ```
 
