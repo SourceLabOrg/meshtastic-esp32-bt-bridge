@@ -174,12 +174,39 @@ void wifi_net_init() {
         Serial.println(WiFi.localIP());
         Serial.printf("[BOOT] Web UI available at: http://%s/\n", WiFi.localIP().toString().c_str());
         
-        if (MDNS.begin(MDNS_HOSTNAME)) {
-            MDNS.setInstanceName(MDNS_HOSTNAME);
+        String mdns_host = "meshtastic-bridge";
+        String mdns_name = "Meshtastic Bridge";
+        
+        if (cfg.ble_name.length() > 0) {
+            mdns_name = cfg.ble_name + " Bridge";
+            
+            // Sanitize host to strict RFC rules (alphanumeric and hyphens only)
+            String sanitized = "";
+            for (int i = 0; i < cfg.ble_name.length(); i++) {
+                char c = cfg.ble_name[i];
+                if (isalnum(c) || c == '-') {
+                    sanitized += c;
+                } else if (c == ' ' || c == '_') {
+                    sanitized += '-';
+                }
+            }
+            if (sanitized.length() == 0) sanitized = "node";
+            
+            // RFC 1035 enforces a 63-character limit. We reserve 7 chars for "-bridge"
+            if (sanitized.length() > 56) {
+                sanitized = sanitized.substring(0, 56);
+            }
+            
+            mdns_host = sanitized + "-bridge";
+            mdns_host.toLowerCase();
+        }
+        
+        if (MDNS.begin(mdns_host.c_str())) {
+            MDNS.setInstanceName(mdns_name.c_str());
             MDNS.addService("meshtastic", "tcp", 4403);
             
             // Add required TXT records so the Meshtastic Apps can parse the name and identity
-            MDNS.addServiceTxt("meshtastic", "tcp", "name", MDNS_HOSTNAME);
+            MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
             
             String mac = WiFi.macAddress();
             mac.replace(":", "");
@@ -189,7 +216,7 @@ void wifi_net_init() {
             String nodeId = "!" + mac.substring(4);
             MDNS.addServiceTxt("meshtastic", "tcp", "id", nodeId);
             
-            Serial.printf("[BOOT] mDNS auto-discovery started (%s.local)\n", MDNS_HOSTNAME);
+            Serial.printf("[BOOT] mDNS auto-discovery started (%s.local as '%s')\n", mdns_host.c_str(), mdns_name.c_str());
         }
 
         // Start web server so settings can also be accessed on local network

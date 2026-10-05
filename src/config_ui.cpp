@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 
+bool g_debug_logs = false;
 Preferences preferences;
 AsyncWebServer server(80);
 
@@ -142,7 +143,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="card-header">
       <div class="card-title">🚀 System</div>
     </div>
-    <div id="reboot-alert" class="alert"></div>
+    <div id="system-alert" class="alert"></div>
+    
+    <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+      <label for="sys-debug-logs" style="margin-bottom:0;">Enable Serial Debug Logs</label>
+      <input type="checkbox" id="sys-debug-logs" onchange="saveSystemSettings()" style="width:20px; height:20px;">
+    </div>
+    
     <button class="btn-primary" id="btn-reboot" onclick="rebootBridge()">Reboot & Start Bridge</button>
     <button class="btn-danger" id="btn-reset" onclick="resetBridge()">Reset All Settings</button>
   </div>
@@ -205,6 +212,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           document.getElementById('input-ble-name').value = cfg.ble_name || '';
           document.getElementById('input-ble-mac').value = cfg.ble_mac || '';
           document.getElementById('input-ble-pin').value = cfg.ble_pin || '';
+          document.getElementById('sys-debug-logs').checked = !!cfg.debug_logs;
         })
         .catch(() => {
           document.getElementById('view-wifi-ssid').innerText = 'Error loading';
@@ -573,6 +581,24 @@ const char index_html[] PROGMEM = R"rawliteral(
       closeModal();
     }
 
+    function saveSystemSettings() {
+      const debugLogs = document.getElementById('sys-debug-logs').checked;
+      fetch('/save_system', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'debug_logs=' + (debugLogs ? 'true' : 'false')
+      }).then(r => r.json()).then(res => {
+        if (res.success) {
+          showAlert('system-alert', 'success', 'System settings saved!');
+          setTimeout(() => { document.getElementById('system-alert').style.display = 'none'; }, 2000);
+        } else {
+          showAlert('system-alert', 'error', res.error || 'Failed to save');
+        }
+      }).catch(err => {
+        showAlert('system-alert', 'error', 'Error saving system settings');
+      });
+    }
+
     function rebootBridge() {
       showModal(
         'Reboot Bridge',
@@ -584,7 +610,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           const btnReset = document.getElementById('btn-reset');
           btnReboot.disabled = true;
           btnReset.disabled = true;
-          showAlert('reboot-alert', 'info', 'Bridge is rebooting... Connect to your local WiFi to use.');
+          showAlert('system-alert', 'info', 'Bridge is rebooting... Connect to your local WiFi to use.');
           fetch('/reboot', { method: 'POST' });
         }
       );
@@ -601,7 +627,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           const btnReboot = document.getElementById('btn-reboot');
           btnReset.disabled = true;
           btnReboot.disabled = true;
-          showAlert('reboot-alert', 'warning', 'All settings erased. Rebooting into Setup Mode...');
+          showAlert('system-alert', 'warning', 'All settings erased. Rebooting into Setup Mode...');
           fetch('/reset', { method: 'POST' });
         }
       );
@@ -627,6 +653,8 @@ BridgeConfig config_ui_load() {
     cfg.ble_name = preferences.getString("ble_name", "");
     cfg.ble_mac = preferences.getString("ble_mac", "");
     cfg.ble_pin = preferences.getString("ble_pin", "");
+    cfg.debug_logs = preferences.getBool("debug_logs", false);
+    g_debug_logs = cfg.debug_logs;
     return cfg;
 }
 
@@ -644,7 +672,8 @@ void config_ui_start_server() {
         json += "\"wifi_has_pass\":" + String(cfg.wifi_pass.length() > 0 ? "true" : "false") + ",";
         json += "\"ble_name\":\"" + cfg.ble_name + "\",";
         json += "\"ble_mac\":\"" + cfg.ble_mac + "\",";
-        json += "\"ble_pin\":\"" + cfg.ble_pin + "\"";
+        json += "\"ble_pin\":\"" + cfg.ble_pin + "\",";
+        json += "\"debug_logs\":" + String(cfg.debug_logs ? "true" : "false");
         json += "}";
         request->send(200, "application/json", json);
     });
@@ -741,6 +770,18 @@ void config_ui_start_server() {
             request->send(200, "application/json", "{\"success\":true}");
         } else {
             request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing ble_mac or ble_pin parameter.\"}");
+        }
+    });
+
+    // Save System configuration
+    server.on("/save_system", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (request->hasParam("debug_logs", true)) {
+            String val = request->getParam("debug_logs", true)->value();
+            g_debug_logs = (val == "true");
+            preferences.putBool("debug_logs", g_debug_logs);
+            request->send(200, "application/json", "{\"success\":true}");
+        } else {
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing debug_logs parameter.\"}");
         }
     });
 

@@ -8,7 +8,10 @@ struct BridgeConfig {
     String ble_name;
     String ble_mac;
     String ble_pin;
+    bool debug_logs;
 };
+
+extern bool g_debug_logs;
 
 // Initialize the Preferences (NVS) 
 void config_ui_init();

@@ -54,7 +54,7 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ### 5. Client Limits & Auto-Discovery
 - **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.
-- **mDNS Auto-Discovery**: The bridge runs an mDNS responder (`meshtastic-bridge.local`). It advertises the `_meshtastic._tcp` service on port 4403, and critically, includes the required TXT records (`name`, `mac`, `id`) so that official Meshtastic apps can instantly discover and properly display the bridge on the local network.
+- **mDNS Auto-Discovery**: The bridge runs an mDNS responder. It dynamically reads the paired Bluetooth device's name (e.g. `DSC_AE25`), sanitizes it to strict RFC 1035 limits (alphanumeric and hyphens, lowercase, max 63 chars), and advertises as `dsc-ae25-bridge.local`. It advertises the `_meshtastic._tcp` service on port 4403, and critically, includes the required TXT records (`name`, `mac`, `id`) so that official Meshtastic apps can instantly discover and properly display the bridge on the local network.
 
 ## Quirks & Potential Pitfalls to Watch Out For
 1. **TCP Stream Fragmentation**: `AsyncTCP` might deliver a single frame in multiple chunks, or multiple frames in a single chunk. We must implement a state machine to buffer incoming TCP bytes until a complete frame is assembled.

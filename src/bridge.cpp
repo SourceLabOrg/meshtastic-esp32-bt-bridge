@@ -6,17 +6,9 @@
 
 #define TCP_PORT 4403
 #define MAX_TCP_CLIENTS 3
-#define BRIDGE_DEBUG 0
-
-#if BRIDGE_DEBUG
-#define DBG_PRINT(...) Serial.print(__VA_ARGS__)
-#define DBG_PRINTLN(...) Serial.println(__VA_ARGS__)
-#define DBG_PRINTF(...) Serial.printf(__VA_ARGS__)
-#else
-#define DBG_PRINT(...)
-#define DBG_PRINTLN(...)
-#define DBG_PRINTF(...)
-#endif
+#define DBG_PRINT(...) if (g_debug_logs) Serial.print(__VA_ARGS__)
+#define DBG_PRINTLN(...) if (g_debug_logs) Serial.println(__VA_ARGS__)
+#define DBG_PRINTF(...) if (g_debug_logs) Serial.printf(__VA_ARGS__)
 
 // Queues for inter-task communication
 static QueueHandle_t tcp_to_ble_queue = NULL;
@@ -245,15 +237,11 @@ static void bridgeBleTask(void* parameter) {
             TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
             
             if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
-                #if BRIDGE_DEBUG
-                Serial.printf("[Bridge-BLE] Writing %zu bytes to ToRadio...\n", packet.len);
-                #endif
+                DBG_PRINTF("[Bridge-BLE] Writing %zu bytes to ToRadio...\n", packet.len);
                 if (toRadioChar && toRadioChar->canWrite()) {
                     // Meshtastic ToRadio expects Write Without Response (false)
                     bool success = toRadioChar->writeValue(packet.data, packet.len, false);
-                    #if BRIDGE_DEBUG
-                    Serial.printf("[Bridge-BLE] Write success: %d\n", success);
-                    #endif
+                    DBG_PRINTF("[Bridge-BLE] Write success: %d\n", success);
                 }
             }
             
@@ -310,10 +298,7 @@ static void bridgeNetTask(void* parameter) {
     while (bridgeRunning) {
         BridgePacket packet;
         if (xQueueReceive(ble_to_tcp_queue, &packet, pdMS_TO_TICKS(100)) == pdTRUE) {
-            #if BRIDGE_DEBUG
-            Serial.printf("[Bridge-Net] Broadcasting %zu bytes to %zu TCP clients\n", packet.len, connectedClientsCount.load());
-            #endif
-            // Build contiguous TCP frame to prevent fragmentation desyncs
+            DBG_PRINTF("[Bridge-Net] Broadcasting %zu bytes to %zu TCP clients\n", packet.len, connectedClientsCount.load());
             // Build contiguous TCP frame to prevent fragmentation desyncs
             size_t frame_len = packet.len + 4;
             uint8_t frame[516]; // Max Meshtastic packet is 512 bytes + 4 byte header
