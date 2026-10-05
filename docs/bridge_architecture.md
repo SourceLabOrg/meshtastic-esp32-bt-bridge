@@ -58,6 +58,7 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ## Quirks & Potential Pitfalls to Watch Out For
 1. **TCP Stream Fragmentation**: `AsyncTCP` might deliver a single frame in multiple chunks, or multiple frames in a single chunk. We must implement a state machine to buffer incoming TCP bytes until a complete frame is assembled.
-2. **BLE Polling vs Notify**: The Python implementation polled the `FromRadio` characteristic every 100ms because their library (`Bleak`) had issues with notifications. We will attempt proper GATT Notifications on `FromNum`/`FromRadio` first using `NimBLE-Arduino` (which is much more robust), falling back to polling only if necessary.
-3. **BLE MTU**: Default BLE MTU is 23 bytes. We must explicitly negotiate a higher MTU (e.g. 512) upon connection so that we can send/receive large protobufs in a single write/read operation.
-4. **Thread Safety**: We must never call BLE characteristic writes from the `AsyncTCP` callback, nor write to `AsyncTCP` clients directly from a BLE callback. Always use FreeRTOS queues to decouple the threads and avoid panics.
+2. **NimBLE MTU Quirks**: Default BLE MTU is 23 bytes. To support large protobufs, we must explicitly request a larger MTU via `NimBLEDevice::setMTU(512)`.
+3. **Thread Safety**: Network events trigger on Core 0, while BLE operations usually block heavily. They must be decoupled using FreeRTOS queues.
+4. **NimBLE Deadlocks (FromNum)**: Calling a blocking `readValue()` inside a BLE notification callback (like `notifyFromNum`) will instantly deadlock the NimBLE background task. To prevent this, we intentionally do NOT subscribe to `FromNum` notifications. Instead, we use a 100ms polling loop on the `FromRadio` characteristic in our own task.
+5. **Write Without Response**: The Meshtastic `ToRadio` characteristic expects *Write Without Response*. Attempting to write with response (requesting an ACK) will fail or hang the BLE communication.

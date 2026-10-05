@@ -125,27 +125,6 @@ static void onClientConnected(void* arg, AsyncClient* client) {
 }
 
 // BLE Notify Callbacks
-static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-    if (connectedClientsCount.load() == 0) return;
-    DBG_PRINTLN("[Bridge-BLE] notifyFromNum triggered!");
-
-    // When FromNum notifies, we read FromRadio
-    if (fromRadioChar) {
-        std::string value = fromRadioChar->readValue();
-        DBG_PRINTF("[Bridge-BLE] Read %d bytes from fromRadioChar\n", value.length());
-        if (value.length() > 0) {
-            BridgePacket packet;
-            packet.len = value.length();
-            packet.data = (uint8_t*)malloc(packet.len);
-            if (packet.data) {
-                memcpy(packet.data, value.data(), packet.len);
-                if (xQueueSend(ble_to_tcp_queue, &packet, 0) != pdTRUE) {
-                    free(packet.data);
-                }
-            }
-        }
-    }
-}
 
 static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (connectedClientsCount.load() == 0) return;
@@ -221,11 +200,13 @@ static void bridgeBleTask(void* parameter) {
                     fromRadioChar = pSvc->getCharacteristic("2c55e69e-4993-11ed-b878-0242ac120002");
                     fromNumChar = pSvc->getCharacteristic("ed9da18c-a800-4f66-a670-aa7547e34453");
                     
-                    if (fromNumChar && fromNumChar->canNotify()) {
-                        fromNumChar->subscribe(true, notifyFromNum);
-                    }
+                    // Note: We intentionally DO NOT subscribe to fromNumChar here.
+                    // Calling a blocking readValue() inside a notification callback deadlocks the NimBLE stack.
+                    // Instead, we rely on the 100ms polling loop below to read fromRadioChar.
+                    
                     if (fromRadioChar && fromRadioChar->canNotify()) {
-                        fromRadioChar->subscribe(true, notifyFromRadio);
+                        bool sub = fromRadioChar->subscribe(true, notifyFromRadio);
+                        DBG_PRINTF("[Bridge-BLE] Subscribed to FromRadio: %d\n", sub);
                     }
                     Serial.println("[Bridge] BLE setup complete. Bridging active.");
                 } else {
@@ -238,15 +219,43 @@ static void bridgeBleTask(void* parameter) {
             }
         } else {
             BridgePacket packet;
+            // Wait up to 100ms for incoming TCP packets to send to BLE
             if (xQueueReceive(tcp_to_ble_queue, &packet, pdMS_TO_TICKS(100)) == pdTRUE) {
                 #if BRIDGE_DEBUG
                 Serial.printf("[Bridge-BLE] Writing %zu bytes to ToRadio...\n", packet.len);
                 #endif
                 if (toRadioChar && toRadioChar->canWrite()) {
-                    // Note: Python script used response=True for writes
-                    toRadioChar->writeValue(packet.data, packet.len, true);
+                    // Meshtastic ToRadio expects Write Without Response (false)
+                    bool success = toRadioChar->writeValue(packet.data, packet.len, false);
+                    #if BRIDGE_DEBUG
+                    Serial.printf("[Bridge-BLE] Write success: %d\n", success);
+                    #endif
                 }
                 free(packet.data);
+            }
+            
+            // POLLING FALLBACK (Matches Python reference bridge behavior)
+            // Some Meshtastic devices fail to trigger FromNum notifications. 
+            // We poll FromRadio every ~100ms (dictated by the xQueueReceive timeout above)
+            if (fromRadioChar && connectedClientsCount.load() > 0) {
+                static std::string lastPacket = "";
+                std::string currentVal = fromRadioChar->readValue();
+                
+                if (currentVal.length() > 0 && currentVal != lastPacket) {
+                    lastPacket = currentVal;
+                    
+                    DBG_PRINTF("[Bridge-BLE] Polled %d new bytes from FromRadio!\n", currentVal.length());
+                    
+                    BridgePacket rx_packet;
+                    rx_packet.len = currentVal.length();
+                    rx_packet.data = (uint8_t*)malloc(rx_packet.len);
+                    if (rx_packet.data) {
+                        memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
+                        if (xQueueSend(ble_to_tcp_queue, &rx_packet, 0) != pdTRUE) {
+                            free(rx_packet.data);
+                        }
+                    }
+                }
             }
         }
     }
