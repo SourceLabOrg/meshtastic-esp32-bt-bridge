@@ -82,6 +82,8 @@ jobs:
               }
             ]
           }
+          EOF
+          
             # 2. Generate the UPDATE manifest (preserves settings by allowing user to uncheck erase)
             cat <<EOF > "../manifest_${board}_update.json"
           {
