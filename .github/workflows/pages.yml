@@ -1,0 +1,91 @@
+name: Deploy Web Flasher to GitHub Pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Web Directory
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch the latest release tag
+          LATEST_TAG=$(gh release list --limit 1 | awk '{print $1}')
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No releases found. Exiting."
+            exit 1
+          fi
+          echo "Latest release is $LATEST_TAG. Downloading binaries..."
+          
+          # Download all zip assets from the latest release
+          gh release download "$LATEST_TAG" -D web/firmware --pattern "*.zip"
+          
+          cd web/firmware
+          # Extract and generate manifest for each board
+          for zip in *.zip; do
+            # Extract board name from filename (e.g. firmware-esp32dev-v1.0.0.zip -> esp32dev)
+            board=$(echo "$zip" | sed -E 's/firmware-(.+)-v[0-9].+/\1/')
+            
+            mkdir -p "$board"
+            unzip "$zip" -d "$board"
+            rm "$zip"
+            
+            # Determine bootloader offset based on chip architecture
+            # ESP32-S3 uses 0x0, classic ESP32 uses 0x1000
+            if [[ "$board" == *"s3"* ]]; then
+              bootloader_offset="0"
+            else
+              bootloader_offset="4096"
+            fi
+            
+            # Generate the manifest.json for this board
+            cat <<EOF > "../manifest_${board}.json"
+{
+  "name": "Meshtastic Bridge ($board)",
+  "version": "$LATEST_TAG",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware/$board/bootloader.bin", "offset": $bootloader_offset },
+        { "path": "firmware/$board/partitions.bin", "offset": 32768 },
+        { "path": "firmware/$board/boot_app0.bin", "offset": 57344 },
+        { "path": "firmware/$board/firmware.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}
+EOF
+          done
+          cd ../../
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './web'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -39,12 +39,22 @@ jobs:
       - name: Prepare Release Assets
         run: |
           mkdir release_assets
-          # Iterate over all compiled environments and copy their firmware.bin
+          BOOT_APP=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
+          
+          # Iterate over all compiled environments and package their binaries
           for dir in .pio/build/*/; do
             board=$(basename "$dir")
             if [ -f "$dir/firmware.bin" ]; then
-              # Rename output binary to include the board name and version
-              cp "$dir/firmware.bin" "release_assets/firmware-${board}-${GITHUB_REF_NAME}.bin"
+              mkdir -p "temp_zip/${board}"
+              cp "$dir/firmware.bin" "temp_zip/${board}/"
+              cp "$dir/bootloader.bin" "temp_zip/${board}/"
+              cp "$dir/partitions.bin" "temp_zip/${board}/"
+              cp "$BOOT_APP" "temp_zip/${board}/boot_app0.bin"
+              
+              # Create a zip archive for the release
+              cd temp_zip/${board}
+              zip -r "../../release_assets/firmware-${board}-${GITHUB_REF_NAME}.zip" *
+              cd ../../
             fi
           done
 

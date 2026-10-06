@@ -23,6 +23,12 @@ Once flashed to an ESP32, the bridge operates entirely standalone:
 3. **Bridge Mode:** The ESP32 reboots, connects to your home WiFi, pairs securely with your Meshtastic radio over Bluetooth, and quietly runs in the background. 
 4. **Auto-Discovery:** The bridge broadcasts itself on your local network using mDNS. Official Meshtastic apps will automatically discover it as if the radio itself was directly plugged into your router.
 
+## Installation (Zero-Install Web Flasher)
+
+The absolute easiest way to install this firmware is by using our Web Flasher. You don't need to download any tools or compilers—just plug your ESP32 into your computer via USB and click a button in your browser (Chrome, Edge, or Opera required).
+
+**[Launch the Meshtastic Bridge Web Flasher](https://sourcelab.github.io/meshtastic-esp32-bt-bridge/)**
+
 ## Basic Setup
 
 *(Assuming you have already flashed the firmware to your ESP32)*
@@ -38,4 +44,3 @@ Once flashed to an ESP32, the bridge operates entirely standalone:
 The ESP32 will reboot, and its LED will turn **solid** once it has successfully connected to both your WiFi network and your Meshtastic radio.
 
 ---
-*Instructions for flashing pre-compiled firmware and setting up a development environment will be added soon.*

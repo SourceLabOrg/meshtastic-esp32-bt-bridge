@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meshtastic BLE-to-TCP Bridge Flasher</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; color: #1c1e21; background: #f0f2f5; }
+        h1 { text-align: center; color: #1a1a1a; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #65676b; margin-bottom: 40px; }
+        .card { background: white; border: 1px solid #ddd; padding: 24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .card h3 { margin-top: 0; color: #0066cc; }
+        .btn-container { margin-top: 20px; }
+        .docs-link { display: block; text-align: center; margin-top: 40px; font-weight: bold; }
+        .docs-link a { color: #0066cc; text-decoration: none; }
+        .docs-link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>📡 Meshtastic BLE-to-TCP Bridge</h1>
+    <p class="subtitle">Zero-install Web Flasher</p>
+    
+    <div class="card">
+        <p>Welcome to the web flasher! This tool will install the transparent bridge firmware directly to your ESP32 via USB using WebSerial. You must use a supported browser (Chrome, Edge, or Opera) on a desktop operating system.</p>
+    </div>
+
+    <h2>Select Your Hardware</h2>
+    
+    <div class="card">
+        <h3>Seeed Studio XIAO ESP32-S3</h3>
+        <p>The officially recommended board. Includes native USB support and active-low LED configuration.</p>
+        <div class="btn-container">
+            <esp-web-install-button manifest="manifest_seeed_xiao_esp32s3.json"></esp-web-install-button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Generic ESP32-S3 DevKit</h3>
+        <p>Standard ESP32-S3 development boards with native USB.</p>
+        <div class="btn-container">
+            <esp-web-install-button manifest="manifest_esp32-s3-devkitc-1.json"></esp-web-install-button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Generic ESP32 (WROOM-32 / NodeMCU)</h3>
+        <p>Classic ESP32 boards using hardware UART (CP2102/CH340) for USB communication.</p>
+        <div class="btn-container">
+            <esp-web-install-button manifest="manifest_esp32dev.json"></esp-web-install-button>
+        </div>
+    </div>
+
+    <div class="docs-link">
+        <p>For full documentation, setup instructions, and troubleshooting, please see the <br>
+        <a href="https://github.com/sourcelab/meshtastic-esp32-bt-bridge" target="_blank">GitHub Repository README</a>.</p>
+    </div>
+</body>
+</html>

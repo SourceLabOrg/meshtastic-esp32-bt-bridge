@@ -12,15 +12,14 @@
 *   **Dynamic mDNS naming:** The bridge automatically sanitizes the saved Bluetooth name and broadcasts it dynamically (e.g. `DSC_AE25-bridge.local`), conforming strictly to RFC 1035 length and character limits.
 *   **Visual Status LED:** Added an asynchronous FreeRTOS LED task (`status_led.cpp`) mapping system states to blink patterns (Fast Blink: Boot, Slow Blink: AP Mode, Medium Blink: Bridge Searching, Solid On: Bridge Connected). Documented in `docs/user_guide.md`.
 
+*   **Distribution & Release Automation:** Built GitHub Actions CI/CD pipelines (`pr_check.yml`, `release.yml`) that automatically inject semver versions, compile multiple board profiles, and attach the binaries to GitHub Releases.
+*   **Web Flasher & GitHub Pages:** Built a zero-install Web Flasher (`web/index.html`) using ESP Web Tools, and an automated GitHub Actions pipeline (`pages.yml`) to deploy it dynamically to GitHub Pages upon every new release.
+*   **Documentation:** Authored comprehensive `README.md` and detailed architectural markdown files.
+
 ## Hardware Profiles Supported
 *   **Seeed XIAO ESP32-S3** (`seeed_xiao_esp32s3`): Native USB, Active Low LED.
 *   **Generic ESP32** (`esp32dev`): Standard WROOM-32, NodeMCU. Hardware UART, Active High LED.
 *   **Generic ESP32-S3 DevKit** (`esp32-s3-devkitc-1`): Standard S3 devkit. Native USB.
 
-
-## Phase 2: Distribution & V2 Features
+## Outstanding Features & Future Roadmap
 *   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
-*   **Documentation:** Write a comprehensive `README.md` introducing the project, features, and setup instructions.
-*   **GitHub Pages Website:** Build a landing page to host on GitHub Pages.
-*   **Web Flasher:** Integrate ESP Web Tools into the GitHub Pages site so users can plug in their ESP32 and flash the bridge directly from their browser (Zero-install setup!).
-*   **CI/CD Pipeline:** Build a GitHub Actions workflow to automatically compile the `.bin` firmware images on GitHub Releases and serve them directly to the Web Flasher.
