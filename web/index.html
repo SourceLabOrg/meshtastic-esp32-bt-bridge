@@ -19,14 +19,17 @@
 </head>
 <body>
     <h1>📡 Meshtastic BLE-to-TCP Bridge</h1>
-    <p class="subtitle">Zero-install Web Flasher</p>
-    
+    <p class="subtitle" id="version-display">Zero-install Web Flasher</p>
+
     <div class="card">
         <p>Welcome to the web flasher! This tool will install the transparent bridge firmware directly to your ESP32 via USB using WebSerial. You must use a supported browser (Chrome, Edge, or Opera) on a desktop operating system.</p>
+
+        <h4 style="color: #d97706; margin-bottom: 5px;">⚠️ Upgrading from a previous version?</h4>
+        <p style="margin-top: 0; font-size: 0.9em;">When prompted by the installer, <strong>DO NOT check the "Erase device" box!</strong> If you leave it unchecked, all of your saved WiFi credentials and Bluetooth pairings will be preserved. Checking the box will wipe the device back to factory Setup Mode.</p>
     </div>
 
     <h2>Select Your Hardware</h2>
-    
+
     <div class="card">
         <h3>Seeed Studio XIAO ESP32-S3</h3>
         <p>The officially recommended board. Includes native USB support and active-low LED configuration.</p>
