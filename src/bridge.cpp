@@ -6,6 +6,7 @@
 #include "status_led.h"
 #include "build_options.h"
 #include "utils.h"
+#include <atomic>
 
 #define DBG_PRINT(...) if (g_debug_logs) Serial.print(__VA_ARGS__)
 #define DBG_PRINTLN(...) if (g_debug_logs) Serial.println(__VA_ARGS__)
@@ -19,8 +20,6 @@ struct BridgePacket {
     uint8_t data[512]; // Max Meshtastic protobuf size
     size_t len;
 };
-
-#include <atomic>
 
 struct ClientContext {
     AsyncClient* client;
@@ -52,10 +51,13 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     // We intentionally leave Nagle's algorithm enabled (false) so LwIP batches the tiny
     // BLE packets together. This prevents WiFi congestion and TCP retransmission timeouts.
     client->setNoDelay(false);
-    client->setRxTimeout(600); // 10 minute idle timeout
+    client->setRxTimeout(TCP_IDLE_TIMEOUT_SECONDS); // 10 minute idle timeout
 
+    // Create new client context to track this connection.
     ClientContext* ctx = new ClientContext();
     ctx->client = client;
+
+    // Only update the tcpClients list after grabbing the mutex
     if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
         tcpClients.push_back(ctx);
         connectedClientsCount++;
@@ -125,12 +127,13 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     client->onDisconnect([](void* arg, AsyncClient* c) {
         ClientContext* ctx = (ClientContext*)arg;
 
+        // Only update the tcpClients list after grabbing the mutex
         if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
             auto it = std::find(tcpClients.begin(), tcpClients.end(), ctx);
             if (it != tcpClients.end()) {
                 tcpClients.erase(it);
+                connectedClientsCount--;
             }
-            connectedClientsCount--;
             xSemaphoreGive(tcpClientsMutex);
         }
 
@@ -139,14 +142,21 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     }, ctx);
 }
 
+/**
+ * Async flag when the Bluetooth device notifies us there is data to be read.
+ * NOTE: This notification path has been found to be unreliable... as a work around we aggressively
+ *       poll for data.
+ */
 static volatile bool pendingRadioRead = false;
-
 static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     pendingRadioRead = true;
 }
 
 static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-    if (connectedClientsCount.load() == 0) return;
+    // If no TCP clients are connected, then just ignore the data.
+    if (connectedClientsCount.load() == 0) {
+        return;
+    }
     DBG_PRINTF("[Bridge-BLE] notifyFromRadio triggered with %zu bytes!\n", length);
 
     // If the device notifies FromRadio directly
@@ -185,11 +195,20 @@ public:
 
 static BridgeRuntimeClientCallbacks bridgeCallbacks;
 
-// BLE Task (Core 1)
+/**
+ * BLE Task (running on Core 1)
+ * This is the task the manages:
+ *  - reading data off of the BLE radio and pushing onto the TCP queue.
+ *  - reading data off of the BLE queue and writing to the BLE radio.
+ */
 static void bridgeBleTask(void* parameter) {
     Serial.println("[Bridge-BLE] BLE Task started on Core 1");
 
     while (bridgeRunning) {
+        /**
+         * If not connected to the BLE device yet, attempt to connect.
+         * Blink the status LED appropriately to indicate no BLE connection is active.
+         */
         if (!bleClient || !bleClient->isConnected()) {
             status_led_set(LED_MED_BLINK);
             Serial.println("[Bridge-BLE] Attempting to connect to Meshtastic BLE device...");
@@ -205,7 +224,7 @@ static void bridgeBleTask(void* parameter) {
                 bleClient->setClientCallbacks(&bridgeCallbacks, false);
             }
 
-            bleClient->setConnectTimeout(10);
+            bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS);
             if (bleClient->connect(addr, false)) {
                 Serial.println("[Bridge-BLE] Connected! Securing connection...");
                 bleClient->secureConnection();
@@ -290,18 +309,22 @@ static void bridgeBleTask(void* parameter) {
                         }
 
                         // We successfully pulled a NEW packet! There might be more packets
-                        // instantly waiting in the queue. Flag it to instantly read again on the next loop!
+                        // waiting in the queue. Flag it to instantly read again on the next loop!
                         pendingRadioRead = true;
                     }
                 }
             }
         }
     }
-
     vTaskDelete(NULL);
 }
 
-// Network broadcast task (runs on Core 0)
+/**
+ * Network broadcast task (runs on Core 0)
+ * Handles:
+ *  - reading data from TCP Queue and writing to connection TCP client(s).
+ *  - reading data from connected TCP clients and writing to BLE queue.
+ */
 static void bridgeNetTask(void* parameter) {
     Serial.println("[Bridge-Net] Network broadcasting Task started on Core 0");
 
@@ -340,22 +363,33 @@ static void bridgeNetTask(void* parameter) {
     vTaskDelete(NULL);
 }
 
+/**
+ * Initialize Bridge.
+ * @param ble_mac MAC address of BLE device to connect to.
+ * @param ble_pin PIN for BLE device.
+ */
 void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     targetBleMac = ble_mac;
     targetBlePin = ble_pin;
 
-    // Massive queues to handle high-speed bursts of Meshtastic Node DB packets
-    tcp_to_ble_queue = xQueueCreate(100, sizeof(BridgePacket));
-    ble_to_tcp_queue = xQueueCreate(100, sizeof(BridgePacket));
+    // Queues to handle high-speed bursts of Meshtastic Node DB packets
+    // Holds up to BRIDGE_QUEUE_SIZE (defaults 100) "packets" of data
+    tcp_to_ble_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
+    ble_to_tcp_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
 
+    // Mutex for thread safe modifying/reading of connected TCP clients.
     tcpClientsMutex = xSemaphoreCreateMutex();
 
+    // Start the tcp server
     tcpServer = new AsyncServer(TCP_PORT);
     tcpServer->onClient(&onClientConnected, tcpServer);
 }
 
 void bridge_start() {
-    if (bridgeRunning) return;
+    // If already running, refuse to start (again).
+    if (bridgeRunning) {
+        return;
+    }
     bridgeRunning = true;
 
     tcpServer->begin();

@@ -8,6 +8,9 @@
 static bool isInitialized = false;
 static bool isScanningFlag = false;
 
+/**
+ * Initialize bluetooth radio.
+ */
 void ble_client_init() {
     if (isInitialized) return;
     NimBLEDevice::init("Meshtastic-Bridge");
@@ -16,12 +19,20 @@ void ble_client_init() {
     pScan->setActiveScan(true);       // Active scan requests scan response packets to get device names
     pScan->setInterval(100);          // 100ms scan interval
     pScan->setWindow(99);             // 99ms scan window
-    pScan->setDuplicateFilter(true);   // Filter duplicate advertisements during a single scan
+    pScan->setDuplicateFilter(true);  // Filter duplicate advertisements during a single scan
 
     isInitialized = true;
-    Serial.println("[BLE] Client initialized with NimBLE.");
+    Serial.println("[BLE] Client initialized.");
 }
 
+/**
+ * Start scanning for available BLE devices asynchronously.
+ * Flips isScanningFlag to true.  Once the scan has completed,
+ * the isScanningFlag will return to false.
+ *
+ * Results can be retrieved by calling ble_client_get_scan_results_json()
+ * after the scan has completed.
+ */
 void ble_client_start_scan() {
     // Init if not already initialized.
     if (!isInitialized) {
@@ -51,6 +62,9 @@ void ble_client_start_scan() {
     }
 }
 
+/**
+ * Stop the BLE device discovery scan.
+ */
 void ble_client_stop_scan() {
     // If not initialized, cannot be scanning.
     if (!isInitialized) {
@@ -67,6 +81,10 @@ void ble_client_stop_scan() {
     }
 }
 
+/**
+ * Check the status of BLE Device Discovery Scan.
+ * @return true if discovery scan is active, false if not.
+ */
 bool ble_client_is_scanning() {
     if (!isInitialized) {
         return false;
@@ -74,12 +92,35 @@ bool ble_client_is_scanning() {
     return isScanningFlag || NimBLEDevice::getScan()->isScanning();
 }
 
+/**
+ * Represents a discovered BLE device.
+ */
 struct DiscoveredDevice {
+    // Reported device name.
     String name;
+
+    // Reported MAC address.
     String mac;
+
+    // RSSI Signal Strength of device.
     int rssi;
 };
 
+/**
+ * Returns array of discovered devices, in JSON format.  This will return a
+ * max of <BLUETOOTH_MAX_DEVICES_DISCOVERABLE> devices, sorted by name descending, and by RSSI (signal strength).
+ *
+ * @return Results of the BLE device discovery scan, in JSON format.
+ *         Example:
+ *         [
+ *              {
+ *                  "name": "device_name_here",
+ *                  "mac": "AA:BB:CC:DD:EE:FF",
+ *                  "rssi": 1
+                },
+                ...
+ *         ]
+ */
 String ble_client_get_scan_results_json() {
     if (!isInitialized) {
         return "[]";
@@ -150,8 +191,19 @@ String ble_client_get_scan_results_json() {
     return json;
 }
 
+/**
+ * Gets set to the configured BLE device PIN.
+ */
 static uint32_t activePasskey = 123456;
+
+/**
+ * State flag, gets set to true when testing a BLE connection/configuration.
+ */
 static bool isTestingFlag = false;
+
+/**
+ * Cached BLE connection test result.
+ */
 static BleTestResult lastTestResult = {false, "", ""};
 
 class BridgeClientCallbacks : public NimBLEClientCallbacks {
@@ -192,7 +244,14 @@ public:
 
 static BridgeClientCallbacks bridgeCallbacks;
 
+/**
+ * Test that we are able to connect to the given BLE device.
+ * @param macStr MAC address of the device to connect to.
+ * @param pinStr The device's PIN.
+ * @return
+ */
 BleTestResult ble_client_test_connection(const String& macStr, const String& pinStr) {
+    // Initialize BT radio if not yet initialized.
     if (!isInitialized) {
         ble_client_init();
     }
@@ -200,6 +259,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     // Stop any active scan first
     ble_client_stop_scan();
 
+    // Sanity check provided mac address.
     if (macStr.isEmpty()) {
         return {false, "No MAC address provided.", ""};
     }
@@ -209,6 +269,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
 
     Serial.printf("[BLE Test] Attempting test connection to %s with PIN %06u...\n", macStr.c_str(), activePasskey);
 
+    // Determine the type of MAC address the BLE device is using.
     NimBLEAddress addr = utils_parse_ble_address(macStr);
 
     // Always delete existing bonding data so the PIN is genuinely challenged every test
@@ -225,17 +286,24 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     }
 
     pClient->setClientCallbacks(&bridgeCallbacks, false);
-    pClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS); // BLUETOOTH_TIMEOUT_SECONDS timeout
+
+    // Set how long to wait for successful connection.
+    pClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS);
 
     Serial.println("[BLE Test] Connecting to peripheral...");
+
+    // Blocks until connected or timeout.
     bool connected = pClient->connect(addr, false);
     if (!connected) {
         Serial.println("[BLE Test] Connection failed or timed out.");
+
+        // Cleanup connection state.
         NimBLEDevice::deleteClient(pClient);
         NimBLEDevice::deleteBond(addr);
         return {false, "Could not connect to BLE device. Ensure it is powered on and within range.", ""};
     }
 
+    // Attempt to make an authenicated/secure connection using the PIN.
     Serial.println("[BLE Test] Connected. Requesting secure pairing...");
     pClient->secureConnection();
 
@@ -270,9 +338,13 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
         return {false, "Pairing rejected by Meshtastic radio. The 6-digit PIN is incorrect.", ""};
     }
 
-    Serial.printf("[BLE Test] Auth verified (Encrypted: %d, Authenticated: %d). Discovering services...\n",
-                  pClient->getConnInfo().isEncrypted(), pClient->getConnInfo().isAuthenticated());
-    // Check for Meshtastic Service
+    Serial.printf(
+        "[BLE Test] Auth verified (Encrypted: %d, Authenticated: %d). Discovering services...\n",
+        pClient->getConnInfo().isEncrypted(),
+        pClient->getConnInfo().isAuthenticated()
+    );
+
+    // We are connected, but does this device provide Meshtastic Service? Or is it just a random device?
     NimBLERemoteService* pSvc = pClient->getService("6ba1b218-15a8-461f-9fa8-5dcae273eafd");
     if (!pSvc) {
         pSvc = pClient->getService("cb0b9a0b-a8c2-49c0-bdd5-3fa12b04d84b");
@@ -324,7 +396,12 @@ static void bleTestTask(void* parameter) {
 }
 
 void ble_client_start_test(const String& macStr, const String& pinStr) {
-    if (isTestingFlag) return;
+    // If already running a test, refuse to start.
+    if (isTestingFlag) {
+        return;
+    }
+
+    // Flip flag to true.
     isTestingFlag = true;
     lastTestResult = {false, "Testing...", ""};
 
@@ -340,10 +417,16 @@ void ble_client_start_test(const String& macStr, const String& pinStr) {
     );
 }
 
+/**
+ * @return True if a BLE connection test is on-going.
+ */
 bool ble_client_is_testing() {
     return isTestingFlag;
 }
 
+/**
+ * @return The results of the most recent BLE connection test
+ */
 BleTestResult ble_client_get_test_result() {
     return lastTestResult;
 }
