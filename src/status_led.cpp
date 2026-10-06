@@ -24,10 +24,29 @@ static void ledTask(void* param) {
         } else if (state == LED_SOLID_ON) {
             digitalWrite(LED_BUILTIN, LED_ON);
             vTaskDelay(pdMS_TO_TICKS(100));
+        } else if (state == LED_SETUP_PATTERN) {
+            // Complex pattern: . . - - (Short Short Long Long)
+            struct Blink { int onMs; int offMs; };
+            Blink pattern[] = {
+                {100, 150}, // Short
+                {100, 150}, // Short
+                {600, 150}, // Long
+                {600, 800}  // Long + Pause
+            };
+            
+            for (int i = 0; i < 4; i++) {
+                if (currentState != state) break;
+                digitalWrite(LED_BUILTIN, LED_ON);
+                vTaskDelay(pdMS_TO_TICKS(pattern[i].onMs));
+                
+                if (currentState != state) break;
+                digitalWrite(LED_BUILTIN, LED_OFF_STATE);
+                vTaskDelay(pdMS_TO_TICKS(pattern[i].offMs));
+            }
         } else {
-            int delayMs = 500;
+            // Normal uniform blinks
+            int delayMs = 500; // LED_MED_BLINK
             if (state == LED_FAST_BLINK) delayMs = 100;
-            else if (state == LED_SLOW_BLINK) delayMs = 1000;
             
             digitalWrite(LED_BUILTIN, LED_ON);
             vTaskDelay(pdMS_TO_TICKS(delayMs));

@@ -56,3 +56,14 @@
 #ifndef BLUETOOTH_MAX_DEVICES_DISCOVERABLE
 #define BLUETOOTH_MAX_DEVICES_DISCOVERABLE 60
 #endif
+
+// -----------------------------------------
+// Firmware & Project Info
+// -----------------------------------------
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "v1.0.0-dev"
+#endif
+
+#ifndef PROJECT_GITHUB_URL
+#define PROJECT_GITHUB_URL "https://www.github.com/sourcelab/meshtastic-esp32-bt-bridge"
+#endif

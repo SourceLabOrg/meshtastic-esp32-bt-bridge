@@ -3,6 +3,7 @@
 #include "wifi_net.h"
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
+#include "build_options.h"
 
 bool g_debug_logs = false;
 Preferences preferences;
@@ -52,6 +53,9 @@ const char index_html[] PROGMEM = R"rawliteral(
   .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
   .alert-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
   .alert-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+  .footer { text-align: center; font-size: 12px; color: #65676b; margin-top: 24px; padding-bottom: 20px; }
+  .footer a { color: #0066cc; text-decoration: none; font-weight: 600; }
+  .footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -152,6 +156,11 @@ const char index_html[] PROGMEM = R"rawliteral(
     
     <button class="btn-primary" id="btn-reboot" onclick="rebootBridge()">Reboot & Start Bridge</button>
     <button class="btn-danger" id="btn-reset" onclick="resetBridge()">Reset All Settings</button>
+  </div>
+
+  <div class="footer">
+    Firmware Version: )rawliteral" FIRMWARE_VERSION R"rawliteral(<br>
+    <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(" target="_blank">View Project on GitHub</a>
   </div>
 
   <!-- Custom In-DOM Modal for Captive Portal compatibility (macOS/iOS CNA) -->

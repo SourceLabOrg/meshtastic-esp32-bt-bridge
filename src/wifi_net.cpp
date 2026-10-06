@@ -100,7 +100,7 @@ String wifi_net_get_scan_results_json() {
 #include "status_led.h"
 
 void wifi_net_start_ap() {
-    status_led_set(LED_SLOW_BLINK);
+    status_led_set(LED_SETUP_PATTERN);
     Serial.println("[WIFI:AP_MODE] Starting AP Mode: Meshtastic-Bridge-Setup");
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP("Meshtastic-Bridge-Setup");
