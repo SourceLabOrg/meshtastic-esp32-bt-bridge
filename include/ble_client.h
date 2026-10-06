@@ -1,8 +1,6 @@
 #pragma once
 #include <Arduino.h>
 
-constexpr uint32_t BLE_SCAN_DURATION_SECONDS = 4;
-
 struct BleTestResult {
     bool success;
     String message;

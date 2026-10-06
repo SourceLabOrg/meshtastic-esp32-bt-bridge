@@ -41,3 +41,18 @@
 #ifndef MAX_TCP_CLIENTS
 #define MAX_TCP_CLIENTS 3
 #endif
+
+// Bluetooth Connect Timeout in seconds
+#ifndef BLUETOOTH_TIMEOUT_SECONDS
+#define BLUETOOTH_TIMEOUT_SECONDS 8
+#endif
+
+// Bluetooth Scan Timeout in seconds
+#ifndef BLUETOOTH_SCAN_TIME_SECONDS
+#define BLUETOOTH_SCAN_TIME_SECONDS 4
+#endif
+
+// Bluetooth Max devices to return from discovery scan.
+#ifndef BLUETOOTH_MAX_DEVICES_DISCOVERABLE
+#define BLUETOOTH_MAX_DEVICES_DISCOVERABLE 60
+#endif

@@ -5,6 +5,7 @@
 #include "config_ui.h" // for bridge config if needed
 #include "status_led.h"
 #include "build_options.h"
+#include "utils.h"
 
 #define DBG_PRINT(...) if (g_debug_logs) Serial.print(__VA_ARGS__)
 #define DBG_PRINTLN(...) if (g_debug_logs) Serial.println(__VA_ARGS__)
@@ -193,7 +194,7 @@ static void bridgeBleTask(void* parameter) {
             status_led_set(LED_MED_BLINK);
             Serial.println("[Bridge-BLE] Attempting to connect to Meshtastic BLE device...");
 
-            NimBLEAddress addr(targetBleMac.c_str());
+            NimBLEAddress addr = utils_parse_ble_address(targetBleMac);
 
             if (!bleClient) {
                 NimBLEDevice::init("Meshtastic-Bridge");
