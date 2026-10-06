@@ -9,15 +9,7 @@
 
 #define MDNS_HOSTNAME "meshtastic-bridge"
 #include <algorithm>
-
-// GPIO 0 is the physical "BOOT" button on most ESP32 boards
-#ifndef BOOT_BUTTON_PIN
-#define BOOT_BUTTON_PIN 0
-#endif
-
-#ifndef TCP_PORT
-#define TCP_PORT 4403
-#endif
+#include "build_options.h"
 
 DNSServer dnsServer;
 bool isApMode = false;

@@ -3,10 +3,7 @@
 #include "wifi_net.h"
 #include "status_led.h"
 #include "bridge.h"
-
-#ifndef BOOT_BUTTON_PIN
-#define BOOT_BUTTON_PIN 0
-#endif
+#include "build_options.h"
 
 // Entry point.
 void setup() {

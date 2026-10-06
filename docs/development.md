@@ -56,3 +56,29 @@ To exit the serial monitor, press `Ctrl + C`.
 * **Upload:** `pio run -t upload`
 * **Monitor:** `pio device monitor`
 * **Upload & Monitor:** `pio run -t upload -t monitor`
+
+---
+## 6. Hardware Configuration & Build Options
+This project is designed to be highly portable across different ESP32 hardware variants. All magic numbers (like hardware pins, port numbers, and LED behaviors) are centralized in the `include/build_options.h` file.
+
+### Overriding at Compile Time
+You do **not** need to modify the C++ code to port this project to a new board. All constants defined in `build_options.h` are wrapped in `#ifndef` guards, meaning you can dynamically override them at compile-time directly inside the `platformio.ini` file using `build_flags`.
+
+For example, if you are using a standard NodeMCU board where the physical BOOT button is on GPIO 15 and the LED is Active High, you would add this to your `platformio.ini`:
+
+```ini
+[env:custom_board]
+platform = espressif32
+board = nodemcu-32s
+framework = arduino
+build_flags = 
+    -D BOOT_BUTTON_PIN=15
+    -D LED_ACTIVE_LOW=false
+```
+
+### Available Build Flags
+- `BOOT_BUTTON_PIN`: The GPIO pin for the physical button used to force Setup Mode (Default: `0`).
+- `LED_BUILTIN`: The GPIO pin for the visual status LED (Default: `21`).
+- `LED_ACTIVE_LOW`: Set to `true` if your board's LED turns ON when the pin is pulled LOW (e.g., XIAO ESP32S3). Set to `false` if it turns ON when pulled HIGH. (Default: `true`).
+- `TCP_PORT`: The network port the bridge listens on for incoming Meshtastic App connections. (Default: `4403`).
+- `MAX_TCP_CLIENTS`: The maximum number of simultaneous apps that can connect to the bridge. (Default: `3`).

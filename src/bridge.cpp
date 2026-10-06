@@ -4,9 +4,8 @@
 #include <NimBLEDevice.h>
 #include "config_ui.h" // for bridge config if needed
 #include "status_led.h"
+#include "build_options.h"
 
-#define TCP_PORT 4403
-#define MAX_TCP_CLIENTS 3
 #define DBG_PRINT(...) if (g_debug_logs) Serial.print(__VA_ARGS__)
 #define DBG_PRINTLN(...) if (g_debug_logs) Serial.println(__VA_ARGS__)
 #define DBG_PRINTF(...) if (g_debug_logs) Serial.printf(__VA_ARGS__)

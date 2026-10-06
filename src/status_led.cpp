@@ -1,13 +1,14 @@
 #include <Arduino.h>
 #include "status_led.h"
+#include "build_options.h"
 
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 21 // Fallback just in case the board variant doesn't define it
-#endif
-
-// The XIAO ESP32S3 user LED is Active LOW
-#define LED_ON  LOW
+#if LED_ACTIVE_LOW
+#define LED_ON LOW
 #define LED_OFF_STATE HIGH
+#else
+#define LED_ON HIGH
+#define LED_OFF_STATE LOW
+#endif
 
 static volatile LedState currentState = LED_OFF;
 
