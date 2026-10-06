@@ -6,8 +6,6 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <vector>
-
-#define MDNS_HOSTNAME "meshtastic-bridge"
 #include <algorithm>
 #include "build_options.h"
 
