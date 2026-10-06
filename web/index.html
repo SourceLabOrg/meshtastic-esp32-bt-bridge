@@ -8,11 +8,11 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; color: #1c1e21; background: #f0f2f5; }
         h1 { text-align: center; color: #1a1a1a; margin-bottom: 10px; }
-        .subtitle { text-align: center; color: #65676b; margin-bottom: 40px; }
+        .subtitle { text-align: center; color: #65676b; margin-bottom: 20px; }
         .card { background: white; border: 1px solid #ddd; padding: 24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .card h3 { margin-top: 0; color: #0066cc; }
         .btn-container { margin-top: 20px; }
-        .docs-link { display: block; text-align: center; margin-top: 40px; font-weight: bold; }
+        .docs-link { display: block; text-align: center; font-weight: bold; margin-bottom: 20px; }
         .docs-link a { color: #0066cc; text-decoration: none; }
         .docs-link a:hover { text-decoration: underline; }
     </style>
@@ -20,6 +20,11 @@
 <body>
     <h1>📡 Meshtastic BLE-to-TCP Bridge</h1>
     <p class="subtitle" id="version-display">Zero-install Web Flasher</p>
+
+    <div class="docs-link">
+        <p>For full documentation, setup instructions, and troubleshooting, please see the <br>
+            <a href="https://github.com/sourcelaborg/meshtastic-esp32-bt-bridge" target="_blank">GitHub Repository README</a>.</p>
+    </div>
 
     <div class="card">
         <p>Welcome to the web flasher! This tool will install the transparent bridge firmware directly to your ESP32 via USB using WebSerial. You must use a supported browser (Chrome, Edge, or Opera) on a desktop operating system.</p>
@@ -34,7 +39,7 @@
         <h3>Seeed Studio XIAO ESP32-S3</h3>
         <p>The officially recommended board. Includes native USB support and active-low LED configuration.</p>
         <div class="btn-container">
-            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_seeed_xiao_esp32s3_update.json"><button slot="button">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_seeed_xiao_esp32s3.json"><button slot="button" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
+            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_seeed_xiao_esp32s3_update.json"><button slot="activate">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_seeed_xiao_esp32s3.json"><button slot="activate" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
         </div>
     </div>
 
@@ -42,7 +47,7 @@
         <h3>Generic ESP32-S3 DevKit</h3>
         <p>Standard ESP32-S3 development boards with native USB.</p>
         <div class="btn-container">
-            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_esp32-s3-devkitc-1_update.json"><button slot="button">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_esp32-s3-devkitc-1.json"><button slot="button" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
+            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_esp32-s3-devkitc-1_update.json"><button slot="activate">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_esp32-s3-devkitc-1.json"><button slot="activate" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
         </div>
     </div>
 
@@ -50,13 +55,8 @@
         <h3>Generic ESP32 (WROOM-32 / NodeMCU)</h3>
         <p>Classic ESP32 boards using hardware UART (CP2102/CH340) for USB communication.</p>
         <div class="btn-container">
-            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_esp32dev_update.json"><button slot="button">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_esp32dev.json"><button slot="button" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
+            <div style="display:flex;gap:10px;align-items:center"><esp-web-install-button manifest="manifest_esp32dev_update.json"><button slot="activate">Update Firmware</button></esp-web-install-button><span style="color:#666;font-size:0.9em">OR</span><esp-web-install-button manifest="manifest_esp32dev.json"><button slot="activate" style="background:#d97706;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">Factory Reset (Wipes Data)</button></esp-web-install-button></div>
         </div>
-    </div>
-
-    <div class="docs-link">
-        <p>For full documentation, setup instructions, and troubleshooting, please see the <br>
-        <a href="https://github.com/sourcelaborg/meshtastic-esp32-bt-bridge" target="_blank">GitHub Repository README</a>.</p>
     </div>
 </body>
 </html>
