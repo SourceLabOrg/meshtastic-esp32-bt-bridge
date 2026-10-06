@@ -15,6 +15,10 @@
 #define BOOT_BUTTON_PIN 0
 #endif
 
+#ifndef TCP_PORT
+#define TCP_PORT 4403
+#endif
+
 DNSServer dnsServer;
 bool isApMode = false;
 
@@ -143,51 +147,94 @@ bool wifi_net_connect_sta(const String& ssid, const String& pass) {
     return false;
 }
 
-// Handles setting up mDNS annoucements.
+/**
+ * Starts the mDNS (Multicast DNS) service to broadcast the bridge on the local network.
+ *
+ * This allows the official Meshtastic apps (iOS/Android/Web) and other network tools
+ * to automatically discover the bridge as if it were a physical Meshtastic node. It
+ * intelligently parses the target's BLE name to mimic its exact identity on the network.
+ *
+ * Under normal/ideal circumstances (e.g., target BLE name is "DSC_af28"):
+ * - mDNS Hostname: "dsc-af28.local" (Resolves to the ESP32's IP address)
+ * - Instance Name: "DSC_af28 Bridge" (Pretty name shown in generic Bonjour browsers)
+ * - Short Name:    "DSC" (Parsed from the prefix before the underscore)
+ * - Node ID:       "!af28" (Parsed from the suffix after the underscore)
+ *
+ * Fallback behaviors:
+ * - Hostname: If BLE name is empty or invalid, falls back to "meshtastic-bridge-<MAC>.local"
+ * - Short Name: If BLE name lacks an underscore, falls back to a default (e.g., "BRDG")
+ * - Node ID: If BLE name lacks an underscore, falls back to "!" + the last 4 characters of the WiFi MAC
+ *
+ * @param cfg The active BridgeConfig containing the target BLE name and MAC.
+ */
 void wifi_net_start_mdns(const BridgeConfig& cfg) {
-    String mdns_host = "meshtastic-bridge";
-    String mdns_name = "Meshtastic Bridge";
+    // Name advertised
+    String mdns_name = "meshtastic_bridge";
+    // Hostname advertised.
+    String mdns_host = "Meshtastic_Bridge";
+    // Shortname advertised
+    String short_name = "Meshtastic_Bridge";
+    // NodeId advertised
+    String node_id = "!";
+
+    // Grab wifi mac address as fall back.
+    String wifiMac = WiFi.macAddress();
+    wifiMac.replace(":", "");
+    while (wifiMac.length() < 4) {
+        wifiMac += "x";
+    }
+    wifiMac = wifiMac.substring(wifiMac.length() - 4);
 
     if (cfg.ble_name.length() > 0) {
         mdns_name = cfg.ble_name + " Bridge";
 
-        // Sanitize host to strict RFC rules (alphanumeric and hyphens only)
-        String sanitized = "";
-        for (int i = 0; i < cfg.ble_name.length(); i++) {
-            char c = cfg.ble_name[i];
-            if (isalnum(c) || c == '-') {
-                sanitized += c;
-            } else if (c == ' ' || c == '_') {
-                sanitized += '-';
-            }
+        // Parse the BLE name (e.g., "DSC_af28")
+        int underscoreIdx = cfg.ble_name.lastIndexOf('_');
+        if (underscoreIdx > 0 && underscoreIdx < cfg.ble_name.length() - 1) {
+            short_name = cfg.ble_name.substring(0, underscoreIdx);
+            node_id += cfg.ble_name.substring(underscoreIdx + 1);
+        } else {
+            // Fallback if BLE name has no '_', use last 4 of mac
+            node_id += wifiMac;
         }
-        if (sanitized.length() == 0) sanitized = "node";
-
-        // RFC 1035 enforces a 63-character limit. We reserve 7 chars for "-bridge"
-        if (sanitized.length() > 56) {
-            sanitized = sanitized.substring(0, 56);
-        }
-
-        mdns_host = sanitized + "-bridge";
-        mdns_host.toLowerCase();
+    } else {
+        node_id += wifiMac;
     }
+
+    // Ensure nodeId is at least 4 characters
+    while (node_id.length() < 4) {
+        node_id += "x";
+    }
+
+    // Sanitize host to strict RFC rules (alphanumeric and hyphens only)
+    String sanitizedHost = "";
+    for (int i = 0; i < cfg.ble_name.length(); i++) {
+        char c = cfg.ble_name[i];
+        if (isalnum(c) || c == '-') {
+            sanitizedHost += c;
+        } else if (c == ' ' || c == '_') {
+            sanitizedHost += '-';
+        }
+    }
+    if (sanitizedHost.length() == 0) {
+        sanitizedHost = "meshtastic-bridge-" + wifiMac;
+    }
+    // RFC 1035 enforces a 63-character limit.
+    if (sanitizedHost.length() > 63) {
+        sanitizedHost = sanitizedHost.substring(0, 63);
+    }
+    mdns_host = sanitizedHost;
+    mdns_host.toLowerCase();
 
     if (MDNS.begin(mdns_host.c_str())) {
         MDNS.setInstanceName(mdns_name.c_str());
-        MDNS.addService("meshtastic", "tcp", 4403);
-
-        // Add required TXT records so the Meshtastic Apps can parse the name and identity
+        MDNS.addService("meshtastic", "tcp", TCP_PORT);
         MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
-
-        String mac = WiFi.macAddress();
-        mac.replace(":", "");
-        MDNS.addServiceTxt("meshtastic", "tcp", "mac", mac);
-
-        // Fake a node ID using the MAC address (Node IDs start with '!')
-        String nodeId = "!" + mac.substring(4);
-        MDNS.addServiceTxt("meshtastic", "tcp", "id", nodeId);
-
-        Serial.printf("[WIFI] mDNS auto-discovery started (%s.local as '%s')\n", mdns_host.c_str(), mdns_name.c_str());
+        MDNS.addServiceTxt("meshtastic", "tcp", "shortname", short_name.c_str());
+        MDNS.addServiceTxt("meshtastic", "tcp", "id", node_id.c_str());
+        Serial.printf("[MDNS] mDNS auto-discovery started (%s.local as '%s_%s')\n", mdns_host.c_str(), short_name.c_str(), node_id.substring(node_id.length() - 4).c_str());
+    } else {
+        Serial.println("[MDNS] Error: Failed to start MDNS advertisement.");
     }
 }
 
