@@ -65,27 +65,8 @@ jobs:
               chip_family="ESP32"
             fi
             
-            # 1. Generate the FULL Factory manifest (wipes device)
+            # Generate the manifest (with prompt erase enabled)
             cat <<EOF > "../manifest_${board}.json"
-          {
-            "name": "Meshtastic Bridge ($board)",
-            "version": "$LATEST_TAG",
-            "builds": [
-              {
-                "chipFamily": "$chip_family",
-                "parts": [
-                  { "path": "firmware/$board/bootloader.bin", "offset": $bootloader_offset },
-                  { "path": "firmware/$board/partitions.bin", "offset": 32768 },
-                  { "path": "firmware/$board/boot_app0.bin", "offset": 57344 },
-                  { "path": "firmware/$board/firmware.bin", "offset": 65536 }
-                ]
-              }
-            ]
-          }
-          EOF
-          
-            # 2. Generate the UPDATE manifest (preserves settings by allowing user to uncheck erase)
-            cat <<EOF > "../manifest_${board}_update.json"
           {
             "name": "Meshtastic Bridge ($board)",
             "version": "$LATEST_TAG",
