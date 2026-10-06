@@ -27,7 +27,7 @@ Once flashed to an ESP32, the bridge operates entirely standalone:
 
 The absolute easiest way to install this firmware is by using our Web Flasher. You don't need to download any tools or compilers—just plug your ESP32 into your computer via USB and click a button in your browser (Chrome, Edge, or Opera required).
 
-**[Launch the Meshtastic Bridge Web Flasher](https://sourcelab.github.io/meshtastic-esp32-bt-bridge/)**
+**[Launch the Meshtastic Bridge Web Flasher](https://sourcelaborg.github.io/meshtastic-esp32-bt-bridge/)**
 
 ## Basic Setup
 
