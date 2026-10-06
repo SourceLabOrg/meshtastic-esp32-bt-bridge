@@ -2,7 +2,11 @@
 
 #include <Arduino.h>
 
-void wifi_net_init();
+#include "config_ui.h" // For BridgeConfig
+
+bool wifi_net_connect_sta(const String& ssid, const String& pass);
+void wifi_net_start_mdns(const BridgeConfig& cfg);
+void wifi_net_start_ap();
 void wifi_net_loop();
 
 // WiFi scanning for captive portal configuration

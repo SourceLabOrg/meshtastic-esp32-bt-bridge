@@ -11,7 +11,9 @@
 #include <algorithm>
 
 // GPIO 0 is the physical "BOOT" button on most ESP32 boards
+#ifndef BOOT_BUTTON_PIN
 #define BOOT_BUTTON_PIN 0
+#endif
 
 DNSServer dnsServer;
 bool isApMode = false;
@@ -33,7 +35,7 @@ bool wifi_net_is_scanning() {
     if (n == WIFI_SCAN_RUNNING) {
         return true;
     }
-    
+
     // If scan just completed and we haven't processed the results yet
     if (n >= 0 && cachedWifiResultsJson == "[]") {
         struct ScannedWifi {
@@ -41,17 +43,17 @@ bool wifi_net_is_scanning() {
             int rssi;
             bool is_open;
         };
-        
+
         std::vector<ScannedWifi> networks;
         networks.reserve(n);
-        
+
         for (int i = 0; i < n; i++) {
             String ssid = WiFi.SSID(i);
             if (ssid.length() == 0) continue;
-            
+
             int rssi = WiFi.RSSI(i);
             bool isOpen = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
-            
+
             bool exists = false;
             for (auto& net : networks) {
                 if (net.ssid == ssid) {
@@ -67,14 +69,14 @@ bool wifi_net_is_scanning() {
                 networks.push_back({ssid, rssi, isOpen});
             }
         }
-        
+
         std::sort(networks.begin(), networks.end(), [](const ScannedWifi& a, const ScannedWifi& b) {
             return a.rssi > b.rssi;
         });
-        
+
         // Strictly limit to the top 30 strongest networks to protect RAM
         size_t max_results = min(networks.size(), (size_t)30);
-        
+
         String json;
         json.reserve(max_results * 64);
         json = "[";
@@ -85,11 +87,11 @@ bool wifi_net_is_scanning() {
             json += "\"is_open\":" + String(networks[i].is_open ? "true" : "false") + "}";
         }
         json += "]";
-        
+
         cachedWifiResultsJson = json;
         WiFi.scanDelete();
     }
-    
+
     return false;
 }
 
@@ -103,71 +105,25 @@ String wifi_net_get_scan_results_json() {
 
 void wifi_net_start_ap() {
     status_led_set(LED_SLOW_BLINK);
-    Serial.println("Starting AP Mode: Meshtastic-Bridge-Setup");
+    Serial.println("[WIFI:AP_MODE] Starting AP Mode: Meshtastic-Bridge-Setup");
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP("Meshtastic-Bridge-Setup");
-    
+
     // Setup Captive Portal DNS - Route all DNS requests to the ESP32's IP
     dnsServer.start(53, "*", WiFi.softAPIP());
-    
+
     // Start the Web Server
     config_ui_start_server();
     isApMode = true;
 }
 
-void wifi_net_init() {
-    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
-    
-    BridgeConfig cfg = config_ui_load();
-    
-    // Check if the physical BOOT button is held down (LOW means pressed)
-    bool buttonPressed = (digitalRead(BOOT_BUTTON_PIN) == LOW);
-    
-    if (buttonPressed || cfg.wifi_ssid.isEmpty() || cfg.ble_mac.isEmpty()) {
-        if (buttonPressed) {
-            Serial.println("\n==========================================");
-            Serial.println("[BOOT] Mode: Setup / Configuration Mode (BOOT button held)");
-            Serial.println("==========================================");
-        } else if (cfg.wifi_ssid.isEmpty()) {
-            Serial.println("\n==========================================");
-            Serial.println("[BOOT] Mode: Setup / Configuration Mode (No saved WiFi credentials)");
-            Serial.println("==========================================");
-        } else {
-            Serial.println("\n==========================================");
-            Serial.println("[BOOT] Mode: Setup / Configuration Mode (No Bluetooth target configured)");
-            Serial.println("==========================================");
-        }
-        
-        wifi_net_start_ap();
-        return;
-    }
-    
-    Serial.println("\n==========================================");
-    Serial.println("[BOOT] Mode: Normal Operating Mode");
-    status_led_set(LED_MED_BLINK);
-    Serial.printf("[BOOT] Target WiFi: %s\n", cfg.wifi_ssid.c_str());
-    if (cfg.ble_mac.length() > 0) {
-        Serial.printf("[BOOT] Target BLE:  %s (%s)\n", cfg.ble_name.c_str(), cfg.ble_mac.c_str());
-    }
-    Serial.println("==========================================");
-    
-    // Provide a 3-second window to press BOOT button to force setup mode
-    Serial.println("[BOOT] Press BOOT button now (or hold anytime for 2s) to enter Setup Mode...");
-    unsigned long startWait = millis();
-    while (millis() - startWait < 3000) {
-        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-            Serial.println("\n[BOOT] BOOT button pressed! Switching to Setup / Configuration Mode.");
-            wifi_net_start_ap();
-            return;
-        }
-        delay(50);
-    }
-    
-    Serial.print("[BOOT] Connecting to WiFi");
-    
+// Handles connecting as a wifi client/station to configured SSID and passkey.
+bool wifi_net_connect_sta(const String& ssid, const String& pass) {
+    Serial.print("[WIFI] Connecting to WiFi");
+
     WiFi.mode(WIFI_STA);
-    WiFi.begin(cfg.wifi_ssid.c_str(), cfg.wifi_pass.c_str());
-    
+    WiFi.begin(ssid.c_str(), pass.c_str());
+
     // Wait up to 10 seconds for connection
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -176,69 +132,62 @@ void wifi_net_init() {
         attempts++;
     }
     Serial.println();
-    
+
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("[BOOT] WiFi Connected successfully!");
-        Serial.print("[BOOT] IP Address: ");
+        Serial.println("[WIFI] WiFi Connected successfully!");
+        Serial.print("[WIFI] IP Address: ");
         Serial.println(WiFi.localIP());
-        Serial.printf("[BOOT] Web UI available at: http://%s/\n", WiFi.localIP().toString().c_str());
-        
-        String mdns_host = "meshtastic-bridge";
-        String mdns_name = "Meshtastic Bridge";
-        
-        if (cfg.ble_name.length() > 0) {
-            mdns_name = cfg.ble_name + " Bridge";
-            
-            // Sanitize host to strict RFC rules (alphanumeric and hyphens only)
-            String sanitized = "";
-            for (int i = 0; i < cfg.ble_name.length(); i++) {
-                char c = cfg.ble_name[i];
-                if (isalnum(c) || c == '-') {
-                    sanitized += c;
-                } else if (c == ' ' || c == '_') {
-                    sanitized += '-';
-                }
+        Serial.printf("[WIFI] Web UI available at: http://%s/\n", WiFi.localIP().toString().c_str());
+        return true;
+    }
+    return false;
+}
+
+// Handles setting up mDNS annoucements.
+void wifi_net_start_mdns(const BridgeConfig& cfg) {
+    String mdns_host = "meshtastic-bridge";
+    String mdns_name = "Meshtastic Bridge";
+
+    if (cfg.ble_name.length() > 0) {
+        mdns_name = cfg.ble_name + " Bridge";
+
+        // Sanitize host to strict RFC rules (alphanumeric and hyphens only)
+        String sanitized = "";
+        for (int i = 0; i < cfg.ble_name.length(); i++) {
+            char c = cfg.ble_name[i];
+            if (isalnum(c) || c == '-') {
+                sanitized += c;
+            } else if (c == ' ' || c == '_') {
+                sanitized += '-';
             }
-            if (sanitized.length() == 0) sanitized = "node";
-            
-            // RFC 1035 enforces a 63-character limit. We reserve 7 chars for "-bridge"
-            if (sanitized.length() > 56) {
-                sanitized = sanitized.substring(0, 56);
-            }
-            
-            mdns_host = sanitized + "-bridge";
-            mdns_host.toLowerCase();
         }
-        
-        if (MDNS.begin(mdns_host.c_str())) {
-            MDNS.setInstanceName(mdns_name.c_str());
-            MDNS.addService("meshtastic", "tcp", 4403);
-            
-            // Add required TXT records so the Meshtastic Apps can parse the name and identity
-            MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
-            
-            String mac = WiFi.macAddress();
-            mac.replace(":", "");
-            MDNS.addServiceTxt("meshtastic", "tcp", "mac", mac);
-            
-            // Fake a node ID using the MAC address (Node IDs start with '!')
-            String nodeId = "!" + mac.substring(4);
-            MDNS.addServiceTxt("meshtastic", "tcp", "id", nodeId);
-            
-            Serial.printf("[BOOT] mDNS auto-discovery started (%s.local as '%s')\n", mdns_host.c_str(), mdns_name.c_str());
+        if (sanitized.length() == 0) sanitized = "node";
+
+        // RFC 1035 enforces a 63-character limit. We reserve 7 chars for "-bridge"
+        if (sanitized.length() > 56) {
+            sanitized = sanitized.substring(0, 56);
         }
 
-        // Start web server so settings can also be accessed on local network
-        config_ui_start_server();
-        
-        // Start the BLE-to-TCP bridge
-        if (!cfg.ble_mac.isEmpty()) {
-            bridge_init(cfg.ble_mac, cfg.ble_pin.toInt());
-            bridge_start();
-        }
-    } else {
-        Serial.println("\n[BOOT] WiFi Connection Failed! Falling back to Setup / Configuration Mode.");
-        wifi_net_start_ap();
+        mdns_host = sanitized + "-bridge";
+        mdns_host.toLowerCase();
+    }
+
+    if (MDNS.begin(mdns_host.c_str())) {
+        MDNS.setInstanceName(mdns_name.c_str());
+        MDNS.addService("meshtastic", "tcp", 4403);
+
+        // Add required TXT records so the Meshtastic Apps can parse the name and identity
+        MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
+
+        String mac = WiFi.macAddress();
+        mac.replace(":", "");
+        MDNS.addServiceTxt("meshtastic", "tcp", "mac", mac);
+
+        // Fake a node ID using the MAC address (Node IDs start with '!')
+        String nodeId = "!" + mac.substring(4);
+        MDNS.addServiceTxt("meshtastic", "tcp", "id", nodeId);
+
+        Serial.printf("[WIFI] mDNS auto-discovery started (%s.local as '%s')\n", mdns_host.c_str(), mdns_name.c_str());
     }
 }
 

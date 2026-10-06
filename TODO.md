@@ -15,3 +15,10 @@
 ## Hardware Note
 *   Target hardware is the **Seeed Studio XIAO ESP32S3**.
 
+
+## Phase 2: Distribution & V2 Features
+*   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
+*   **Documentation:** Write a comprehensive `README.md` introducing the project, features, and setup instructions.
+*   **GitHub Pages Website:** Build a landing page to host on GitHub Pages.
+*   **Web Flasher:** Integrate ESP Web Tools into the GitHub Pages site so users can plug in their ESP32 and flash the bridge directly from their browser (Zero-install setup!).
+*   **CI/CD Pipeline:** Build a GitHub Actions workflow to automatically compile the `.bin` firmware images on GitHub Releases and serve them directly to the Web Flasher.
