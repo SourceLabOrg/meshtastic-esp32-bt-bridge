@@ -19,7 +19,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,22 +59,22 @@ jobs:
             
             # Generate the manifest.json for this board
             cat <<EOF > "../manifest_${board}.json"
-{
-  "name": "Meshtastic Bridge ($board)",
-  "version": "$LATEST_TAG",
-  "builds": [
-    {
-      "chipFamily": "ESP32",
-      "parts": [
-        { "path": "firmware/$board/bootloader.bin", "offset": $bootloader_offset },
-        { "path": "firmware/$board/partitions.bin", "offset": 32768 },
-        { "path": "firmware/$board/boot_app0.bin", "offset": 57344 },
-        { "path": "firmware/$board/firmware.bin", "offset": 65536 }
-      ]
-    }
-  ]
-}
-EOF
+          {
+            "name": "Meshtastic Bridge ($board)",
+            "version": "$LATEST_TAG",
+            "builds": [
+              {
+                "chipFamily": "ESP32",
+                "parts": [
+                  { "path": "firmware/$board/bootloader.bin", "offset": $bootloader_offset },
+                  { "path": "firmware/$board/partitions.bin", "offset": 32768 },
+                  { "path": "firmware/$board/boot_app0.bin", "offset": 57344 },
+                  { "path": "firmware/$board/firmware.bin", "offset": 65536 }
+                ]
+              }
+            ]
+          }
+          EOF
           done
           cd ../../
 
