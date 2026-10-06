@@ -78,7 +78,32 @@ build_flags =
 
 ### Available Build Flags
 - `BOOT_BUTTON_PIN`: The GPIO pin for the physical button used to force Setup Mode (Default: `0`).
-- `LED_BUILTIN`: The GPIO pin for the visual status LED (Default: `21`).
+- `STATUS_LED_PIN`: The GPIO pin for the visual status LED (Default: `21`).
 - `LED_ACTIVE_LOW`: Set to `true` if your board's LED turns ON when the pin is pulled LOW (e.g., XIAO ESP32S3). Set to `false` if it turns ON when pulled HIGH. (Default: `true`).
 - `TCP_PORT`: The network port the bridge listens on for incoming Meshtastic App connections. (Default: `4403`).
 - `MAX_TCP_CLIENTS`: The maximum number of simultaneous apps that can connect to the bridge. (Default: `3`).
+
+---
+## 7. Releasing a New Version
+
+The project is fully automated using GitHub Actions. To release a new firmware version, you **do not** need to manually compile or upload binaries. 
+
+Follow these steps to trigger the CI/CD pipeline:
+
+1. **Commit your code to `main`**: Ensure all your local changes are pushed to the `main` branch.
+2. **Tag the release**: Create a SemVer-compliant git tag (e.g., `v1.2.0`) and push it to GitHub:
+   ```bash
+   git tag v1.2.0
+   git push origin v1.2.0
+   ```
+3. **Wait for the Release Pipeline**: 
+   * Navigate to the **Actions** tab on your GitHub repository.
+   * You will see the **Draft Release** workflow running. This workflow dynamically injects the `v1.2.0` string into the C++ code, compiles all hardware profiles (`esp32dev`, `esp32s3`, etc.), packages the `.bin` files, and drafts a GitHub Release for you.
+4. **Publish the Draft**:
+   * Navigate to the **Releases** tab on your GitHub repository.
+   * Click **Edit** on the newly generated Draft release.
+   * Add any specific release notes and click **Publish Release**.
+5. **Wait for the Web Flasher Pipeline**:
+   * As soon as you click Publish, the **Deploy Web Flasher to GitHub Pages** action will automatically trigger.
+   * It will securely download your newly compiled release binaries, automatically generate the `manifest.json` configurations for ESP Web Tools, and deploy them to `https://sourcelaborg.github.io/meshtastic-esp32-bt-bridge/`.
+   * The web flasher will instantly update to show "Firmware Version: v1.2.0".
