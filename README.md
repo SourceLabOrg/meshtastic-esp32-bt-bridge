@@ -6,14 +6,6 @@ If you have a Bluetooth-only Meshtastic device (like a T-Echo, SenseCAP, or a ba
 
 > **Note:** This project is heavily inspired by the excellent Python-based [meshtastic-ble-bridge](https://github.com/meshtastic/meshtastic-ble-bridge). If you are looking to run a bridge on a Raspberry Pi, Mac, or Windows computer rather than dedicated microcontroller hardware, we highly recommend using the Python project instead!
 
-## Supported Hardware
-
-This firmware is written in C++ using the Arduino framework and PlatformIO. It is designed to be as portable as possible and should work on almost any ESP32 variant that supports both WiFi and Bluetooth Low Energy:
-
-*   **ESP32-S3** (Recommended, tested extensively on the Seeed XIAO ESP32S3)
-*   **ESP32** (Classic)
-*   **ESP32-S2 / C3** (Assuming BLE/WiFi combo support)
-
 ## How It Works
 
 Once flashed to an ESP32, the bridge operates entirely standalone:
@@ -23,15 +15,33 @@ Once flashed to an ESP32, the bridge operates entirely standalone:
 3. **Bridge Mode:** The ESP32 reboots, connects to your home WiFi, pairs securely with your Meshtastic radio over Bluetooth, and quietly runs in the background. 
 4. **Auto-Discovery:** The bridge broadcasts itself on your local network using mDNS. Official Meshtastic apps will automatically discover it as if the radio itself was directly plugged into your router.
 
-## Installation (Zero-Install Web Flasher)
+## What Hardware do I Need?
 
-The absolute easiest way to install this firmware is by using our Web Flasher. You don't need to download any tools or compilers—just plug your ESP32 into your computer via USB and click a button in your browser (Chrome, Edge, or Opera required).
+You will need a supported ESP32 microcontroller board. 
 
-**[Launch the Meshtastic Bridge Web Flasher](https://sourcelaborg.github.io/meshtastic-esp32-bt-bridge/)**
+**Highly Recommended:**
+*   **[Seeed Studio XIAO ESP32-S3](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html)**: This is the officially recommended board for this project. It is incredibly tiny, has native USB support, and features a powerful antenna.
+    *   *Optional:* You can **[3D print this excellent case](https://www.printables.com/model/1445678-case-for-seeed-xiao-esp32s3-and-the-default-antenn/files)** designed specifically to hold the board and its default antenna!
 
-## Basic Setup
+**Other Supported Hardware:**
+*   **Generic ESP32-S3 DevKit:** Any standard ESP32-S3 development board with native USB.
+*   **Generic ESP32 (Classic):** Standard WROOM-32 or NodeMCU style boards.
 
-*(Assuming you have already flashed the firmware to your ESP32)*
+*(Note: ESP32-S2 boards are not supported as they lack Bluetooth hardware).*
+
+## How Do I Install It?
+
+The absolute easiest way to install this firmware is by using our zero-install Web Flasher. You don't need to download any tools or compilers.
+
+1. Plug your ESP32 board into your computer via USB.
+2. Open a supported browser (Chrome, Edge, or Opera on a desktop OS).
+3. **[Launch the Meshtastic Bridge Web Flasher](https://sourcelaborg.github.io/meshtastic-esp32-bt-bridge/)**
+4. Locate your hardware in the list.
+5. If this is a brand new board, click **Factory Reset (Wipes Data)**. If you are upgrading an existing bridge, click **Update Firmware**.
+
+## How do I set it up?
+
+Once you have successfully flashed the firmware to your ESP32, follow these steps to configure it:
 
 1. Power on your ESP32. The built-in LED will blink rapidly for 5 seconds.
 2. The LED will change to a repeating setup pattern (short, short, long, long). This indicates it is broadcasting its Setup WiFi network.
@@ -43,4 +53,27 @@ The absolute easiest way to install this firmware is by using our Web Flasher. Y
 
 The ESP32 will reboot, and its LED will turn **solid** once it has successfully connected to both your WiFi network and your Meshtastic radio.
 
----
+## How do I use it?
+
+Once the bridge is running with a solid LED, it is entirely transparent!
+
+1. Open your Meshtastic App (iOS, Android, or Web UI).
+2. Select a **Network / TCP** connection.
+3. The bridge will automatically advertise itself on your local network using Apple Bonjour / mDNS. It will show up using the exact same name as your radio's Bluetooth name (e.g., `Meshtastic_ABCD`).
+4. Simply click to connect! 
+
+> **Note:** The bridge supports multiplexing, meaning **up to 3 clients** (e.g., your phone, your tablet, and your desktop) can all connect to the radio simultaneously over WiFi!
+
+### Re-configuring the Bridge
+
+If you ever need to change your WiFi credentials or connect to a different Meshtastic radio, you have two options:
+
+**Option A (Via your local network):**
+If the bridge is already connected to your home WiFi, simply open a web browser and navigate to `http://<your_device_name>.local` (e.g., `http://Meshtastic_ABCD.local`). This will load the Captive Portal UI directly over your home network.
+
+**Option B (Hardware Reset):**
+If you changed your WiFi router and the bridge can no longer connect to your network, you can force it back into Setup Mode:
+1. Press the Reset (RST) button on your ESP32.
+2. The LED will begin flashing rapidly for 5 seconds.
+3. While it is flashing, press and hold the **BOOT** button on the ESP32.
+4. The LED will switch to the setup pattern, and it will begin broadcasting the `Meshtastic-Bridge-Setup` WiFi Access Point again.

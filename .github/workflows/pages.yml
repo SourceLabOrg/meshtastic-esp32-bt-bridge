@@ -39,6 +39,10 @@ jobs:
           # Inject the version string into the HTML
           sed -i "s/id=\"version-display\">.*</id=\"version-display\">Firmware Version: ${LATEST_TAG}</g" web/index.html
           
+          # Add a cache-buster to the manifest URLs to prevent browser caching issues
+          # We use GITHUB_RUN_ID so even manual re-runs on the same tag bypass the cache
+          sed -i "s/\.json/\.json?v=${GITHUB_RUN_ID}/g" web/index.html
+          
           # Download all zip assets from the latest release
           gh release download "$LATEST_TAG" -D web/firmware --pattern "*.zip"
           
@@ -61,7 +65,7 @@ jobs:
               chip_family="ESP32"
             fi
             
-            # Generate the manifest.json for this board
+            # 1. Generate the FULL Factory manifest (wipes device)
             cat <<EOF > "../manifest_${board}.json"
           {
             "name": "Meshtastic Bridge ($board)",
@@ -73,6 +77,22 @@ jobs:
                   { "path": "firmware/$board/bootloader.bin", "offset": $bootloader_offset },
                   { "path": "firmware/$board/partitions.bin", "offset": 32768 },
                   { "path": "firmware/$board/boot_app0.bin", "offset": 57344 },
+                  { "path": "firmware/$board/firmware.bin", "offset": 65536 }
+                ]
+              }
+            ]
+          }
+          EOF
+          
+            # 2. Generate the UPDATE manifest (preserves settings)
+            cat <<EOF > "../manifest_${board}_update.json"
+          {
+            "name": "Meshtastic Bridge ($board)",
+            "version": "$LATEST_TAG",
+            "builds": [
+              {
+                "chipFamily": "$chip_family",
+                "parts": [
                   { "path": "firmware/$board/firmware.bin", "offset": 65536 }
                 ]
               }
