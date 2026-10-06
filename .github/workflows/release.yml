@@ -1,0 +1,56 @@
+name: Draft Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Trigger on version tags e.g. v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_release:
+    name: Build & Draft Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install PlatformIO Core
+        run: pip install -U platformio
+
+      - name: Inject Version into Firmware
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          echo "Injecting version: $VERSION"
+          # Find and replace the FIRMWARE_VERSION string inside build_options.h
+          sed -i "s/#define FIRMWARE_VERSION .*/#define FIRMWARE_VERSION \"$VERSION\"/g" include/build_options.h
+
+      - name: Build all firmware profiles
+        run: pio run
+
+      - name: Prepare Release Assets
+        run: |
+          mkdir release_assets
+          # Iterate over all compiled environments and copy their firmware.bin
+          for dir in .pio/build/*/; do
+            board=$(basename "$dir")
+            if [ -f "$dir/firmware.bin" ]; then
+              # Rename output binary to include the board name and version
+              cp "$dir/firmware.bin" "release_assets/firmware-${board}-${GITHUB_REF_NAME}.bin"
+            fi
+          done
+
+      - name: Draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: release_assets/*

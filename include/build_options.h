@@ -17,10 +17,10 @@
 #endif
 
 // The built-in status LED used for visual blinking.
-// If your Arduino board variant automatically defines LED_BUILTIN, it will use that.
+// If your Arduino board variant automatically defines STATUS_LED_PIN, it will use that.
 // Otherwise, it falls back to this pin (21 is standard for Seeed XIAO ESP32S3).
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 21
+#ifndef STATUS_LED_PIN
+#define STATUS_LED_PIN 21
 #endif
 
 // Does the LED turn ON when the pin is pulled LOW?

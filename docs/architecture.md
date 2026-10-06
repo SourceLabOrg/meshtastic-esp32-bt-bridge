@@ -4,7 +4,7 @@
 This project is an ESP32-based transparent bridge that connects to a Meshtastic radio via Bluetooth Low Energy (BLE) and exposes it as a standard Meshtastic TCP connection over WiFi. This allows standard Meshtastic software (web UI, Python CLI, Android/iOS apps) to connect to the ESP32 over the local network as if it were a native network-connected Meshtastic device.
 
 ## Core Requirements
-*   **Hardware Compatibility:** Target a wide range of ESP32 microcontrollers (ESP32, ESP32-S2/S3/C3) that support both WiFi and Bluetooth.
+*   **Hardware Compatibility:** Maintain separate PlatformIO build profiles for the Seeed XIAO ESP32-S3, Generic ESP32 (WROOM-32), and Generic ESP32-S3 DevKit to cover 95% of active microcontrollers without code refactoring. ESP32-S2 is explicitly excluded due to lack of Bluetooth silicon.
 *   **Bluetooth Connection:** Act as a BLE Central device, connecting to the Meshtastic radio (BLE Peripheral). Must support secure pairing with a PIN code.
 *   **WiFi Connection:** Connect to a local WiFi network.
 *   **TCP Server:** Expose a TCP port (default Meshtastic port is 4403) that accepts incoming connections.

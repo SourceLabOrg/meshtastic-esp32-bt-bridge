@@ -12,8 +12,10 @@
 *   **Dynamic mDNS naming:** The bridge automatically sanitizes the saved Bluetooth name and broadcasts it dynamically (e.g. `DSC_AE25-bridge.local`), conforming strictly to RFC 1035 length and character limits.
 *   **Visual Status LED:** Added an asynchronous FreeRTOS LED task (`status_led.cpp`) mapping system states to blink patterns (Fast Blink: Boot, Slow Blink: AP Mode, Medium Blink: Bridge Searching, Solid On: Bridge Connected). Documented in `docs/user_guide.md`.
 
-## Hardware Note
-*   Target hardware is the **Seeed Studio XIAO ESP32S3**.
+## Hardware Profiles Supported
+*   **Seeed XIAO ESP32-S3** (`seeed_xiao_esp32s3`): Native USB, Active Low LED.
+*   **Generic ESP32** (`esp32dev`): Standard WROOM-32, NodeMCU. Hardware UART, Active High LED.
+*   **Generic ESP32-S3 DevKit** (`esp32-s3-devkitc-1`): Standard S3 devkit. Native USB.
 
 
 ## Phase 2: Distribution & V2 Features

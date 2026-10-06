@@ -13,16 +13,16 @@
 static volatile LedState currentState = LED_OFF;
 
 static void ledTask(void* param) {
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LED_OFF_STATE);
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(STATUS_LED_PIN, LED_OFF_STATE);
     
     while(true) {
         LedState state = currentState;
         if (state == LED_OFF) {
-            digitalWrite(LED_BUILTIN, LED_OFF_STATE);
+            digitalWrite(STATUS_LED_PIN, LED_OFF_STATE);
             vTaskDelay(pdMS_TO_TICKS(100));
         } else if (state == LED_SOLID_ON) {
-            digitalWrite(LED_BUILTIN, LED_ON);
+            digitalWrite(STATUS_LED_PIN, LED_ON);
             vTaskDelay(pdMS_TO_TICKS(100));
         } else if (state == LED_SETUP_PATTERN) {
             // Complex pattern: . . - - (Short Short Long Long)
@@ -36,11 +36,11 @@ static void ledTask(void* param) {
             
             for (int i = 0; i < 4; i++) {
                 if (currentState != state) break;
-                digitalWrite(LED_BUILTIN, LED_ON);
+                digitalWrite(STATUS_LED_PIN, LED_ON);
                 vTaskDelay(pdMS_TO_TICKS(pattern[i].onMs));
                 
                 if (currentState != state) break;
-                digitalWrite(LED_BUILTIN, LED_OFF_STATE);
+                digitalWrite(STATUS_LED_PIN, LED_OFF_STATE);
                 vTaskDelay(pdMS_TO_TICKS(pattern[i].offMs));
             }
         } else {
@@ -48,13 +48,13 @@ static void ledTask(void* param) {
             int delayMs = 500; // LED_MED_BLINK
             if (state == LED_FAST_BLINK) delayMs = 100;
             
-            digitalWrite(LED_BUILTIN, LED_ON);
+            digitalWrite(STATUS_LED_PIN, LED_ON);
             vTaskDelay(pdMS_TO_TICKS(delayMs));
             
             // Check state again so we don't force a full blink cycle if the state changed rapidly
             if (currentState != state) continue;
             
-            digitalWrite(LED_BUILTIN, LED_OFF_STATE);
+            digitalWrite(STATUS_LED_PIN, LED_OFF_STATE);
             vTaskDelay(pdMS_TO_TICKS(delayMs));
         }
     }
