@@ -23,6 +23,12 @@ The ESP32 will act as a BLE Client and connect to the target Meshtastic Node (BL
 - **FromNum (Notify)**: `ed9da18c-a800-4f66-a670-aa7547e34453`
   - Triggers when a new packet is available to be read from `FromRadio`.
 
+### 3. BLE Addressing & Auto-Detection
+Meshtastic devices utilize different BLE address types depending on the manufacturer:
+- **ESP32 Nodes** (e.g., T-Beam, Heltec) typically use **Public Addresses**.
+- **nRF52 Nodes** (e.g., SenseCAP, RAK) typically use **Random Static Addresses** (mathematically required to start with `C`, `D`, `E`, or `F` hex characters).
+- To support seamless bridging to any device, our `utils_parse_ble_address` dynamically inspects the MSB of the configured MAC address. If it detects a C/D/E/F prefix, it forces `BLE_ADDR_RANDOM`, preventing connection timeouts across all hardware architectures.
+
 ## C++ ESP32 Implementation Strategy
 
 ### 1. Multithreading & Tasks
@@ -54,7 +60,7 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ### 5. Client Limits & Auto-Discovery
 - **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.
-- **mDNS Auto-Discovery**: The bridge runs an mDNS responder. It dynamically reads the paired Bluetooth device's name (e.g. `DSC_AE25`), sanitizes it to strict RFC 1035 limits (alphanumeric and hyphens, lowercase, max 63 chars), and advertises as `dsc-ae25-bridge.local`. It advertises the `_meshtastic._tcp` service on port 4403, and critically, includes the required TXT records (`name`, `mac`, `id`) so that official Meshtastic apps can instantly discover and properly display the bridge on the local network.
+- **mDNS Auto-Discovery**: The bridge runs an mDNS responder. It dynamically reads the paired BLE device's name (e.g. `DSC_ae28`), and uses a custom parser to extract the Shortname (`DSC`) and Node ID (`!ae28`), padding with `x`s if necessary. It sanitizes the full BLE name to strict RFC 1035 limits and uses it as the host (advertising as `dsc-ae28.local`). It advertises the `_meshtastic._tcp` service on port `4403`, and critically, includes the required TXT records (`name`, `shortname`, `id`) so that official Meshtastic apps can instantly discover and properly display the bridge on the local network.
 
 ## Quirks & Potential Pitfalls to Watch Out For
 1. **TCP Stream Fragmentation**: `AsyncTCP` might deliver a single frame in multiple chunks, or multiple frames in a single chunk. We must implement a state machine to buffer incoming TCP bytes until a complete frame is assembled.

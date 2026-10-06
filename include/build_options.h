@@ -65,5 +65,5 @@
 #endif
 
 #ifndef PROJECT_GITHUB_URL
-#define PROJECT_GITHUB_URL "https://www.github.com/sourcelab/meshtastic-esp32-bt-bridge"
+#define PROJECT_GITHUB_URL "https://www.github.com/sourcelaborg/meshtastic-esp32-bt-bridge"
 #endif

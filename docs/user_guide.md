@@ -4,8 +4,8 @@
 
 The bridge uses the ESP32's built-in LED to visually communicate its current state:
 
-*   **Fast Blink** (100ms on / 100ms off): **Booting up.** The device is starting. This lasts for 2 seconds. Press and hold the BOOT button now to enter Setup Mode.
-*   **Slow Blink** (1000ms on / 1000ms off): **Setup Mode / Captive Portal.** The bridge is broadcasting its `Meshtastic-Bridge-Setup` WiFi network. Connect to it to configure the bridge.
+*   **Fast Blink** (100ms on / 100ms off): **Booting up.** The device is starting. This lasts for 5 seconds. Press and hold the BOOT button now to enter Setup Mode.
+*   **Setup Pattern** (Short, Short, Long, Long): **Setup Mode / Captive Portal.** The bridge is broadcasting its `Meshtastic-Bridge-Setup` WiFi network. Connect to it to configure the bridge.
 *   **Medium Blink** (500ms on / 500ms off): **Searching.** The bridge is in normal operating mode but is currently disconnected from the target Meshtastic Bluetooth radio. It is actively scanning to reconnect.
 *   **Solid ON:** **Connected.** The bridge has successfully secured a Bluetooth connection with the Meshtastic radio and is actively routing packets.
 

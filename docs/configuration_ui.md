@@ -22,6 +22,8 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Contains a toggle for **Enable Serial Debug Logs**.
   * Contains a **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
   * Contains a **Reset All Settings** action (with confirmation dialog) that clears all stored NVS credentials and restarts into Setup Mode.
+* **Footer:**
+  * Dynamically embeds the compiled Firmware Version and links to the project's GitHub repository.
 
 ### 2. Live WiFi & BLE Scanning
 * **WiFi Scanning:** Runs asynchronously via `WiFi.scanNetworks(true)` in `WIFI_AP_STA` mode without dropping the captive portal AP connection. Discovered networks are deduplicated and ordered by signal strength (RSSI).
