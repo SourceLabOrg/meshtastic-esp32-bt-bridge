@@ -22,4 +22,5 @@
 *   **Generic ESP32-S3 DevKit** (`esp32-s3-devkitc-1`): Standard S3 devkit. Native USB.
 
 ## Outstanding Features & Future Roadmap
+*   **Optional MQTT Broker Gateway / Proxy:** Enable autonomous MQTT proxying directly from the ESP32 bridge when the connected radio has `proxy_to_client_enabled` turned on. See full design and task tracking in [docs/feature-mqtt-proxy.md](file:///Users/spowis/Documents/code/meshtastic-esp32-bt-bridge/docs/feature-mqtt-proxy.md).
 *   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
