@@ -2,6 +2,13 @@
 #include <Arduino.h>
 #include <NimBLEAddress.h>
 
+// Global debug log toggle
+extern bool g_debug_logs;
+
+// Override Arduinos hardcoded log_d to respect our runtime toggle
+#undef log_d
+#define log_d(format, ...) do { if(g_debug_logs) log_printf(ARDUHAL_LOG_FORMAT(D, format), ##__VA_ARGS__); } while(0)
+
 // Dynamically enable or disable debug level logging
 void utils_set_debug_logging(bool enable);
 

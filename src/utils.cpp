@@ -1,23 +1,21 @@
 #include "utils.h"
 #include "esp_log.h"
 
+bool g_debug_logs = false;
+
 /**
  * Enable/Disable debug logging.
  * @param enableDebugLogs true to enable debug logging, false to disable
  */
 void utils_set_debug_logging(bool enableDebugLogs) {
+    g_debug_logs = enableDebugLogs;
+    
     if (enableDebugLogs) {
         // Set default log level to INFO.
         esp_log_level_set("*", ESP_LOG_INFO);
-
-        // Set the log level for our own application tag to debug.
-        esp_log_level_set(ARDUHAL_ESP_LOG_TAG, ESP_LOG_DEBUG);
     } else {
         // Set default log level to warning.
         esp_log_level_set("*", ESP_LOG_WARN);
-
-        // Set the log level for our own application tag to info.
-        esp_log_level_set(ARDUHAL_ESP_LOG_TAG, ESP_LOG_INFO);
     }
 }
 
