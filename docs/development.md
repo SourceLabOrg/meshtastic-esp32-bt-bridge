@@ -81,7 +81,13 @@ build_flags =
 - `STATUS_LED_PIN`: The GPIO pin for the visual status LED (Default: `21`).
 - `LED_ACTIVE_LOW`: Set to `true` if your board's LED turns ON when the pin is pulled LOW (e.g., XIAO ESP32S3). Set to `false` if it turns ON when pulled HIGH. (Default: `true`).
 - `TCP_PORT`: The network port the bridge listens on for incoming Meshtastic App connections. (Default: `4403`).
+- `TCP_IDLE_TIMEOUT_SECONDS`: How long before idle TCP connections will be disconnected. (Default: `600`).
 - `MAX_TCP_CLIENTS`: The maximum number of simultaneous apps that can connect to the bridge. (Default: `3`).
+- `BLUETOOTH_TIMEOUT_SECONDS`: Bluetooth connection timeout. (Default: `8`).
+- `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration. (Default: `4`).
+- `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to keep in memory from discovery scan. (Default: `60`).
+- `WIFI_MAX_NETWORKS_DISCOVERABLE`: Maximum number of WiFi networks to keep in memory from discovery scan. (Default: `30`).
+- `BRIDGE_QUEUE_SIZE`: Size of the FreeRTOS message queues between BLE and TCP tasks. (Default: `100`).
 
 ---
 ## 7. Releasing a New Version
