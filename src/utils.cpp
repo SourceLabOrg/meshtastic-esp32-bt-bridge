@@ -1,6 +1,12 @@
 #include "utils.h"
 
 /**
+ * Global debug log enable/disable flag.
+ * If true, additional debug logs will be generated.
+ */
+bool g_debug_logs = false;
+
+/**
  * Given a string json value, escape it.
  * @param input Value to be escaped.
  * @return Escaped input.

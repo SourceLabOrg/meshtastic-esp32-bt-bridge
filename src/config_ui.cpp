@@ -17,11 +17,6 @@ Preferences preferences;
 AsyncWebServer server(80);
 
 /**
- * Debug flag.
- */
-bool g_debug_logs = false;
-
-/**
  * Defines the namespace which preferences are stored to NVS under.
  */
 const char* PREF_NAMESPACE = "bridge_cfg";
@@ -686,7 +681,11 @@ BridgeConfig config_ui_load() {
     cfg.ble_mac = preferences.getString("ble_mac", "");
     cfg.ble_pin = preferences.getString("ble_pin", "");
     cfg.debug_logs = preferences.getBool("debug_logs", false);
+
+    // Set global debug log enable/disable flag.
     g_debug_logs = cfg.debug_logs;
+
+    // return config.
     return cfg;
 }
 
@@ -812,7 +811,11 @@ void config_ui_start_server() {
     server.on("/save_system", HTTP_POST, [](AsyncWebServerRequest *request){
         if (request->hasParam("debug_logs", true)) {
             String val = request->getParam("debug_logs", true)->value();
+
+            // Update global debug log flag based on passed value
             g_debug_logs = (val == "true");
+
+            // Push into preferences.
             preferences.putBool("debug_logs", g_debug_logs);
             request->send(200, "application/json", "{\"success\":true}");
         } else {

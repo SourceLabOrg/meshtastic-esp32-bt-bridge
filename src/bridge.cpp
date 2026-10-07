@@ -8,10 +8,6 @@
 #include "utils.h"
 #include <atomic>
 
-#define DBG_PRINT(...) if (g_debug_logs) Serial.print(__VA_ARGS__)
-#define DBG_PRINTLN(...) if (g_debug_logs) Serial.println(__VA_ARGS__)
-#define DBG_PRINTF(...) if (g_debug_logs) Serial.printf(__VA_ARGS__)
-
 // Queues for inter-task communication
 static QueueHandle_t tcp_to_ble_queue = NULL;
 static QueueHandle_t ble_to_tcp_queue = NULL;

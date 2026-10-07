@@ -11,8 +11,6 @@ struct BridgeConfig {
     bool debug_logs;
 };
 
-extern bool g_debug_logs;
-
 // Initialize the Preferences (NVS)
 void config_ui_init();
 
