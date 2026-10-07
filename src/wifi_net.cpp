@@ -8,6 +8,7 @@
 #include <vector>
 #include <algorithm>
 #include "build_options.h"
+#include "status_led.h"
 
 /**
  * DNS server used during Captive Portal Mode to ensure redirects
@@ -60,7 +61,7 @@ bool wifi_net_is_scanning() {
     }
 
     if (numNetworksFound == WIFI_SCAN_FAILED) {
-        Serial.println("[WIFI:AP_MODE] ERROR: Failed to perform Wifi Scan!");
+        Serial.println("[WIFI:AP_MODE] ERROR: WiFi Scan failed.");
 
         // What should we do to handle this? delete the scan?
         WiFi.scanDelete();
@@ -81,6 +82,7 @@ bool wifi_net_is_scanning() {
         std::vector<ScannedWifi> networks;
         networks.reserve(numNetworksFound);
 
+        // Iterate over found networks collecting details and generating results json.
         for (int i = 0; i < numNetworksFound; i++) {
             String ssid = WiFi.SSID(i);
             if (ssid.length() == 0) {
@@ -135,13 +137,19 @@ bool wifi_net_is_scanning() {
     return false;
 }
 
+/**
+ * @return JSON representation of found Wifi networks
+ * Format of:
+ * [
+ *      {"ssid": "ssid_here", "rssi": 1, "is_open": true/false},
+ *      ...
+ * ]
+ */
 String wifi_net_get_scan_results_json() {
     // Ensure any finished scan results are cached
     wifi_net_is_scanning();
     return cachedWifiResultsJson;
 }
-
-#include "status_led.h"
 
 void wifi_net_start_ap() {
     status_led_set(LED_SETUP_PATTERN);
@@ -276,6 +284,9 @@ void wifi_net_start_mdns(const BridgeConfig& cfg) {
     }
 }
 
+/**
+ * Handle processing DNS requests if running in AP mode.
+ */
 void wifi_net_loop() {
     if (isApMode) {
         // Must be called repeatedly to handle DNS requests for the captive portal
