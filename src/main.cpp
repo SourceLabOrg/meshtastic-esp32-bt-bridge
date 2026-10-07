@@ -10,8 +10,9 @@
  * Main Entry point.
  */
 void setup() {
-    // Start serial console.
+    // Start serial console and enable sending log output to it.
     Serial.begin(115200);
+    Serial.setDebugOutput(true);
 
     // Initialize Status LED,
     status_led_init();
@@ -28,6 +29,9 @@ void setup() {
     BridgeConfig cfg = config_ui_load();
 
     // Set global ESP-IDF log level based on UI setting
+    if (cfg.debug_logs) {
+        log_i("Debug logging enabled!");
+    }
     utils_set_debug_logging(cfg.debug_logs);
 
     // Determine which boot mode to enter.

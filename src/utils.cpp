@@ -7,6 +7,15 @@
  */
 void utils_set_debug_logging(bool enable) {
     esp_log_level_set("*", enable ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+
+    // Squelch exceptionally noisy libraries
+    if (enable) {
+        esp_log_level_set("wifi", ESP_LOG_INFO);
+        esp_log_level_set("wifi_init", ESP_LOG_INFO);
+    } else {
+        esp_log_level_set("wifi", ESP_LOG_WARN);
+        esp_log_level_set("wifi_init", ESP_LOG_WARN);
+    }
 }
 
 /**
