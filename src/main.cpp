@@ -4,13 +4,15 @@
 #include "status_led.h"
 #include "bridge.h"
 #include "build_options.h"
+#include "utils.h"
 
 /**
  * Main Entry point.
  */
 void setup() {
-    // Start serial console.
+    // Start serial console and enable sending log output to it.
     Serial.begin(115200);
+    Serial.setDebugOutput(true);
 
     // Initialize Status LED,
     status_led_init();
@@ -20,11 +22,17 @@ void setup() {
 
     // Initial delay waiting for serial to start, USB to connect and catch up.
     delay(2000);
-    Serial.println("\n--- Starting Meshtastic ESP32 BT-TCP Bridge ---");
+    log_i("\n--- Starting Meshtastic ESP32 BT-TCP Bridge ---");
 
     // Load stored configuration properties from NVS
     config_ui_init();
     BridgeConfig cfg = config_ui_load();
+
+    // Set global ESP-IDF log level based on UI setting
+    if (cfg.debug_logs) {
+        log_i("Debug logging enabled!");
+    }
+    utils_set_debug_logging(cfg.debug_logs);
 
     // Determine which boot mode to enter.
     // Check if BOOT button is held during power-on.
@@ -38,12 +46,12 @@ void setup() {
 
     // Wait up to 5 seconds for setup button to be pressed.
     if (!btnPressed && !cfg.wifi_ssid.isEmpty() && !cfg.ble_mac.isEmpty()) {
-        Serial.println("[BOOT] Press button in next 5 seconds to enter setup mode...");
+        log_i("[BOOT] Press button in next 5 seconds to enter setup mode...");
 
         unsigned long startWait = millis();
         while (millis() - startWait < 5000) {
             if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-                Serial.println("[BOOT] Entering Setup Mode (button pressed)");
+                log_i("[BOOT] Entering Setup Mode (button pressed)");
                 btnPressed = true;
                 break;
             }
@@ -55,10 +63,10 @@ void setup() {
     if (btnPressed) {
         forceSetup = true;
     } else if (cfg.wifi_ssid.isEmpty()) {
-        Serial.println("[BOOT] Entering Setup Mode (No saved WiFi credentials)");
+        log_i("[BOOT] Entering Setup Mode (No saved WiFi credentials)");
         forceSetup = true;
     } else if (cfg.ble_mac.isEmpty()) {
-        Serial.println("[BOOT] Entering Setup Mode (No Bluetooth target configured)");
+        log_i("[BOOT] Entering Setup Mode (No Bluetooth target configured)");
         forceSetup = true;
     }
 
@@ -67,11 +75,11 @@ void setup() {
         wifi_net_start_ap();
     } else {
         // Normal boot, log config
-        Serial.println("\n==========================================");
-        Serial.println("[BOOT] Mode: Normal Operating Mode");
-        Serial.printf("[BOOT] Target WiFi: %s\n", cfg.wifi_ssid.c_str());
-        Serial.printf("[BOOT] Target BLE:  %s (%s)\n", cfg.ble_name.c_str(), cfg.ble_mac.c_str());
-        Serial.println("==========================================");
+        log_i("\n==========================================");
+        log_i("[BOOT] Mode: Normal Operating Mode");
+        log_i("[BOOT] Target WiFi: %s", cfg.wifi_ssid.c_str());
+        log_i("[BOOT] Target BLE:  %s (%s)", cfg.ble_name.c_str(), cfg.ble_mac.c_str());
+        log_i("==========================================");
 
         // Start Medium Blink to indicate 'searching for bluetooth and wifi'
         status_led_set(LED_MED_BLINK);
@@ -89,7 +97,7 @@ void setup() {
             bridge_init(cfg.ble_mac, cfg.ble_pin.toInt());
             bridge_start();
         } else {
-            Serial.println("[BOOT] WiFi Connection Failed! Falling back to Setup Mode.");
+            log_i("[BOOT] WiFi Connection Failed! Falling back to Setup Mode.");
             wifi_net_start_ap();
         }
     }

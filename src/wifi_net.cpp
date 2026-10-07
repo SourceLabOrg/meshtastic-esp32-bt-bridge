@@ -61,7 +61,7 @@ bool wifi_net_is_scanning() {
     }
 
     if (numNetworksFound == WIFI_SCAN_FAILED) {
-        Serial.println("[WIFI:AP_MODE] ERROR: WiFi Scan failed.");
+        log_e("[WIFI:AP_MODE] ERROR: WiFi Scan failed.");
 
         // What should we do to handle this? delete the scan?
         WiFi.scanDelete();
@@ -153,7 +153,7 @@ String wifi_net_get_scan_results_json() {
 
 void wifi_net_start_ap() {
     status_led_set(LED_SETUP_PATTERN);
-    Serial.println("[WIFI:AP_MODE] Starting AP Mode: Meshtastic-Bridge-Setup");
+    log_i("[WIFI:AP_MODE] Starting AP Mode: Meshtastic-Bridge-Setup");
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP("Meshtastic-Bridge-Setup");
 
@@ -169,25 +169,22 @@ void wifi_net_start_ap() {
 
 // Handles connecting as a wifi client/station to configured SSID and passkey.
 bool wifi_net_connect_sta(const String& ssid, const String& pass) {
-    Serial.print("[WIFI] Connecting to WiFi");
+    log_i("[WIFI] Connecting to WiFi: %s", ssid.c_str());
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), pass.c_str());
 
-    // Wait up to 10 seconds for connection
+    // Wait up to 10 seconds for connection (20 * 500 ms delay)
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(500);
-        Serial.print(".");
         attempts++;
     }
-    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("[WIFI] WiFi Connected successfully!");
-        Serial.print("[WIFI] IP Address: ");
-        Serial.println(WiFi.localIP());
-        Serial.printf("[WIFI] Web UI available at: http://%s/\n", WiFi.localIP().toString().c_str());
+        log_i("[WIFI] WiFi Connected successfully!");
+        log_i("[WIFI] IP Address: %s", WiFi.localIP().toString().c_str());
+        log_i("[WIFI] Web UI available at: http://%s/", WiFi.localIP().toString().c_str());
         return true;
     }
     return false;
@@ -278,9 +275,9 @@ void wifi_net_start_mdns(const BridgeConfig& cfg) {
         MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
         MDNS.addServiceTxt("meshtastic", "tcp", "shortname", short_name.c_str());
         MDNS.addServiceTxt("meshtastic", "tcp", "id", node_id.c_str());
-        Serial.printf("[MDNS] mDNS auto-discovery started (%s.local as '%s_%s')\n", mdns_host.c_str(), short_name.c_str(), node_id.substring(node_id.length() - 4).c_str());
+        log_i("[MDNS] mDNS auto-discovery started (%s.local as '%s_%s')", mdns_host.c_str(), short_name.c_str(), node_id.substring(node_id.length() - 4).c_str());
     } else {
-        Serial.println("[MDNS] Error: Failed to start MDNS advertisement.");
+        log_e("[MDNS] Error: Failed to start MDNS advertisement.");
     }
 }
 

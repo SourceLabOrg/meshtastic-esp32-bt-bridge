@@ -1,10 +1,23 @@
 #include "utils.h"
+#include "esp_log.h"
+
+bool g_debug_logs = false;
 
 /**
- * Global debug log enable/disable flag.
- * If true, additional debug logs will be generated.
+ * Enable/Disable debug logging.
+ * @param enableDebugLogs true to enable debug logging, false to disable
  */
-bool g_debug_logs = false;
+void utils_set_debug_logging(bool enableDebugLogs) {
+    g_debug_logs = enableDebugLogs;
+    
+    if (enableDebugLogs) {
+        // Set default log level to INFO.
+        esp_log_level_set("*", ESP_LOG_INFO);
+    } else {
+        // Set default log level to warning.
+        esp_log_level_set("*", ESP_LOG_WARN);
+    }
+}
 
 /**
  * Given a string json value, escape it.

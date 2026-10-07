@@ -22,7 +22,7 @@ void ble_client_init() {
     pScan->setDuplicateFilter(true);  // Filter duplicate advertisements during a single scan
 
     isInitialized = true;
-    Serial.println("[BLE] Client initialized.");
+    log_i("[BLE] Client initialized.");
 }
 
 /**
@@ -41,7 +41,7 @@ void ble_client_start_scan() {
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (isScanningFlag || pScan->isScanning()) {
-        Serial.println("[BLE] Scan already in progress, ignoring request.");
+        log_i("[BLE] Scan already in progress, ignoring request.");
         return;
     }
 
@@ -50,15 +50,15 @@ void ble_client_start_scan() {
     isScanningFlag = true;
 
     // Start asynchronous scan for BLUETOOTH_SCAN_TIME_SECONDS
-    Serial.printf("[BLE] Starting scan (%d seconds)...\n", BLUETOOTH_SCAN_TIME_SECONDS);
+    log_i("[BLE] Starting scan (%d seconds)...", BLUETOOTH_SCAN_TIME_SECONDS);
     bool started = pScan->start(BLUETOOTH_SCAN_TIME_SECONDS, [](NimBLEScanResults results) {
         isScanningFlag = false;
-        Serial.printf("[BLE] Scan finished. Found %d device(s).\n", results.getCount());
+        log_i("[BLE] Scan finished. Found %d device(s).", results.getCount());
     }, false);
 
     if (!started) {
         isScanningFlag = false;
-        Serial.println("[BLE] Failed to start scan.");
+        log_e("[BLE] Failed to start scan.");
     }
 }
 
@@ -68,16 +68,16 @@ void ble_client_start_scan() {
 void ble_client_stop_scan() {
     // If not initialized, cannot be scanning.
     if (!isInitialized) {
-        Serial.println("[BLE] Not initialized, no scan to stop.");
+        log_i("[BLE] Not initialized, no scan to stop.");
         return;
     }
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (isScanningFlag || pScan->isScanning()) {
         pScan->stop();
         isScanningFlag = false;
-        Serial.println("[BLE] scan stopped.");
+        log_i("[BLE] scan stopped.");
     } else {
-        Serial.println("[BLE] No scan to stop.");
+        log_i("[BLE] No scan to stop.");
     }
 }
 
@@ -220,20 +220,20 @@ public:
 
     uint32_t onPassKeyRequest() override {
         passkeyPrompted = true;
-        Serial.printf("[BLE] Passkey requested by server, providing PIN: %06u\n", activePasskey);
+        log_i("[BLE] Passkey requested by server, providing PIN: %06u", activePasskey);
         return activePasskey;
     }
 
     bool onConfirmPIN(uint32_t pin) override {
         passkeyPrompted = true;
-        Serial.printf("[BLE] Confirming PIN: %06u\n", pin);
+        log_i("[BLE] Confirming PIN: %06u", pin);
         return (pin == activePasskey);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
         authCompleted = true;
         authFailed = !desc->sec_state.encrypted;
-        Serial.printf(
+        log_i(
             "[BLE] Authentication complete. Encrypted: %d, Authenticated: %d, Bonded: %d\n",
             desc->sec_state.encrypted,
             desc->sec_state.authenticated,
@@ -267,7 +267,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     activePasskey = pinStr.toInt();
     bridgeCallbacks.reset();
 
-    Serial.printf("[BLE Test] Attempting test connection to %s with PIN %06u...\n", macStr.c_str(), activePasskey);
+    log_i("[BLE Test] Attempting test connection to %s with PIN %06u...", macStr.c_str(), activePasskey);
 
     // Determine the type of MAC address the BLE device is using.
     NimBLEAddress addr = utils_parse_ble_address(macStr);
@@ -281,7 +281,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
 
     NimBLEClient* pClient = NimBLEDevice::createClient();
     if (!pClient) {
-        Serial.println("[BLE Test] ERROR: Failed to create BLE Client instance (out of memory).");
+        log_e("[BLE Test] ERROR: Failed to create BLE Client instance (out of memory).");
         return {false, "Failed to create BLE Client instance (out of memory).", ""};
     }
 
@@ -290,12 +290,12 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     // Set how long to wait for successful connection.
     pClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS);
 
-    Serial.println("[BLE Test] Connecting to peripheral...");
+    log_i("[BLE Test] Connecting to peripheral...");
 
     // Blocks until connected or timeout.
     bool connected = pClient->connect(addr, false);
     if (!connected) {
-        Serial.println("[BLE Test] Connection failed or timed out.");
+        log_i("[BLE Test] Connection failed or timed out.");
 
         // Cleanup connection state.
         NimBLEDevice::deleteClient(pClient);
@@ -304,7 +304,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     }
 
     // Attempt to make an authenicated/secure connection using the PIN.
-    Serial.println("[BLE Test] Connected. Requesting secure pairing...");
+    log_i("[BLE Test] Connected. Requesting secure pairing...");
     pClient->secureConnection();
 
     // Wait up to BLUETOOTH_TIMEOUT_SECONDS for authentication handshake to complete
@@ -326,8 +326,8 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     }
 
     if (!isAuth) {
-        Serial.printf(
-            "[BLE Test] Pairing/Auth rejected: connected=%d, authCompleted=%d, authFailed=%d\n",
+        log_e(
+            "[BLE Test] Pairing/Auth rejected: connected=%d, authCompleted=%d, authFailed=%d",
             pClient->isConnected(),
             bridgeCallbacks.authCompleted,
             bridgeCallbacks.authFailed
@@ -338,8 +338,8 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
         return {false, "Pairing rejected by Meshtastic radio. The 6-digit PIN is incorrect.", ""};
     }
 
-    Serial.printf(
-        "[BLE Test] Auth verified (Encrypted: %d, Authenticated: %d). Discovering services...\n",
+    log_i(
+        "[BLE Test] Auth verified (Encrypted: %d, Authenticated: %d). Discovering services...",
         pClient->getConnInfo().isEncrypted(),
         pClient->getConnInfo().isAuthenticated()
     );
@@ -351,14 +351,14 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     }
 
     if (!pSvc) {
-        Serial.println("[BLE Test] Meshtastic Service UUID not found.");
+        log_i("[BLE Test] Meshtastic Service UUID not found.");
         pClient->disconnect();
         NimBLEDevice::deleteClient(pClient);
         NimBLEDevice::deleteBond(addr);
         return {false, "Connected, but device does NOT provide the Meshtastic BLE Service.", ""};
     }
 
-    Serial.println("[BLE Test] Checking Meshtastic characteristics...");
+    log_i("[BLE Test] Checking Meshtastic characteristics...");
     // Check for ToRadio and FromRadio characteristics
     NimBLERemoteCharacteristic* pFromRadio = pSvc->getCharacteristic("2c55e69e-4993-11ed-b878-0242ac120002");
     if (!pFromRadio) {
@@ -367,14 +367,14 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     NimBLERemoteCharacteristic* pToRadio = pSvc->getCharacteristic("f75c76d2-129e-4dad-a1dd-7866124401e7");
 
     if (!pFromRadio || !pToRadio) {
-        Serial.println("[BLE Test] Required ToRadio/FromRadio characteristics missing.");
+        log_i("[BLE Test] Required ToRadio/FromRadio characteristics missing.");
         pClient->disconnect();
         NimBLEDevice::deleteClient(pClient);
         NimBLEDevice::deleteBond(addr);
         return {false, "Meshtastic service found, but required ToRadio / FromRadio characteristics are missing.", ""};
     }
 
-    Serial.println("[BLE Test] Success! Disconnecting and clearing test bond.");
+    log_i("[BLE Test] Success! Disconnecting and clearing test bond.");
     pClient->disconnect();
     NimBLEDevice::deleteClient(pClient);
     NimBLEDevice::deleteBond(addr);
