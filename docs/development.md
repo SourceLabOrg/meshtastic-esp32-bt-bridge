@@ -90,7 +90,30 @@ build_flags =
 - `BRIDGE_QUEUE_SIZE`: Size of the FreeRTOS message queues between BLE and TCP tasks. (Default: `100`).
 
 ---
-## 7. Releasing a New Version
+## 7. Logging & Debugging
+
+This project uses a combination of native ESP-IDF logging macros and custom overrides to maintain a clean console while allowing dynamic runtime debugging.
+
+### Background & Limitations
+The underlying Arduino Core (specifically version 2.0.17 used in the official `6.9.0` platform) maps standard `log_d()` calls to a raw `log_printf`. This bypasses the native ESP-IDF `esp_log_level_set()` filtering mechanism. If we compile with global debug logs enabled (`CORE_DEBUG_LEVEL=4`), the internal Arduino libraries (like the WiFi driver) will constantly spam the console with their internal state machine events (`WIFI_READY`, `STA_START`, etc.), and we cannot silence them at runtime.
+
+### Our Solution
+To achieve a clean console while preserving our own debug logs, we use the following strategy:
+
+1. **Global Compile-Time Mute:** In `platformio.ini`, we set `-D CORE_DEBUG_LEVEL=3` (Info Level). This instructs the compiler to permanently strip out all `log_d` (Debug) and `log_v` (Verbose) statements from the background Arduino libraries, completely silencing the WiFi and OS spam.
+2. **Runtime Toggle for App Logs:** We want our own debug logs to be toggleable via the Web UI. Since the global `CORE_DEBUG_LEVEL=3` would normally strip our `log_d` calls too, we bypass it. In `include/utils.h`, we `#undef log_d` and redefine it as our own custom macro:
+   ```cpp
+   #define log_d(format, ...) do { if(g_debug_logs) log_printf(ARDUHAL_LOG_FORMAT(D, format), ##__VA_ARGS__); } while(0)
+   ```
+   This ensures that any of *our* source files that include `utils.h` can use standard `log_d("...")` syntax, but the logs will only print if the user has enabled the "Enable Serial Debug Logs" toggle in the Web UI.
+
+### Adjusting Logs
+- **Application Logs (Normal Use):** Simply connect to the Web UI (Setup Mode) and toggle **"Enable Serial Debug Logs"**. This sets `g_debug_logs = true` and saves it to NVS.
+- **Deep Framework Debugging (Advanced):** If you absolutely must debug the internal state machines of the WiFi or LwIP libraries, you must modify `platformio.ini`, set `-D CORE_DEBUG_LEVEL=4`, and recompile the firmware. Be prepared for significant console noise.
+- **Bluetooth (NimBLE) Logs:** NimBLE is configured via its own flag in `platformio.ini`. We currently set `-D CONFIG_NIMBLE_CPP_LOG_LEVEL=2` (Warning) to keep it quiet. You can increase this to `4` (Debug) if you need to debug raw GATT characteristics.
+
+---
+## 8. Releasing a New Version
 
 The project is fully automated using GitHub Actions. To release a new firmware version, you **do not** need to manually compile or upload binaries. 
 
