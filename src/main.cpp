@@ -5,13 +5,17 @@
 #include "bridge.h"
 #include "build_options.h"
 
-// Entry point.
+/**
+ * Main Entry point.
+ */
 void setup() {
     // Start serial console.
     Serial.begin(115200);
 
-    // Initialize Status LED, and "boot" button as input button.
+    // Initialize Status LED,
     status_led_init();
+
+    // Configure "boot button" pin and setup on/off as high/low depending on board.
     pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
 
     // Initial delay waiting for serial to start, USB to connect and catch up.
@@ -74,10 +78,11 @@ void setup() {
 
         // Connect to wifi
         if (wifi_net_connect_sta(cfg.wifi_ssid, cfg.wifi_pass)) {
-            // Start mDNS announcing.
+            // Start mDNS advertising.
             wifi_net_start_mdns(cfg);
 
-            // Start up the config web server.
+            // Start up the captive portal web server.
+            // TODO: Should this be password protected / Optionally enabled?
             config_ui_start_server();
 
             // Init and start bridge BLE <--> WIFI

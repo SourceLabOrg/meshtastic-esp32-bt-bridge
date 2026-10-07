@@ -1,5 +1,16 @@
 #include "utils.h"
 
+/**
+ * Global debug log enable/disable flag.
+ * If true, additional debug logs will be generated.
+ */
+bool g_debug_logs = false;
+
+/**
+ * Given a string json value, escape it.
+ * @param input Value to be escaped.
+ * @return Escaped input.
+ */
 String utils_escape_json(const String& input) {
     String output = "";
     for (size_t i = 0; i < input.length(); i++) {
@@ -16,6 +27,10 @@ String utils_escape_json(const String& input) {
     return output;
 }
 
+/**
+ * @param macStr MAC Address to parse
+ * @return NimBLEAddress configured with the appropriate type and MAC address
+ */
 NimBLEAddress utils_parse_ble_address(const String& macStr) {
     uint8_t addrType = BLE_ADDR_PUBLIC; // Default to public
 

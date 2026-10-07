@@ -6,16 +6,29 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <vector>
-
-#define MDNS_HOSTNAME "meshtastic-bridge"
 #include <algorithm>
 #include "build_options.h"
+#include "status_led.h"
 
+/**
+ * DNS server used during Captive Portal Mode to ensure redirects
+ * to our captive portal website.
+ */
 DNSServer dnsServer;
+
+/**
+ * Flag set to true when running in Captive Portal mode.
+ */
 bool isApMode = false;
 
+/**
+ * Holds our cached Wifi search/scan results.
+ */
 static String cachedWifiResultsJson = "[]";
 
+/**
+ * Start a scan for available wifi networks.
+ */
 void wifi_net_start_scan() {
     int16_t status = WiFi.scanComplete();
     if (status == WIFI_SCAN_RUNNING) {
@@ -26,14 +39,40 @@ void wifi_net_start_scan() {
     WiFi.scanNetworks(true);
 }
 
+/**
+ * Check if a wifi network scan is in progress.
+ * If a network scan is complete, it will populate the results of the scan
+ * into the cachedWifiResultsJson variable.
+ *
+ * @return True if a Wifi network scan is currently in progress, false otherwise.
+ */
 bool wifi_net_is_scanning() {
-    int16_t n = WiFi.scanComplete();
-    if (n == WIFI_SCAN_RUNNING) {
+    /**
+     * This returns one of three value types.
+     * -1 (WIFI_SCAN_RUNNING) : The scan is currently active in the background and hasn't finished yet.
+     * -2 (WIFI_SCAN_FAILED) : The scan failed to trigger.
+     * 0 or greater : The scan has successfully completed, and the integer returned is the actual count of how many WiFi networks it found.
+     */
+    int16_t numNetworksFound = WiFi.scanComplete();
+    if (numNetworksFound == WIFI_SCAN_RUNNING) {
+        // Scan is still running, not yet completed.
+        // return true to indicate still running.
         return true;
     }
 
-    // If scan just completed and we haven't processed the results yet
-    if (n >= 0 && cachedWifiResultsJson == "[]") {
+    if (numNetworksFound == WIFI_SCAN_FAILED) {
+        Serial.println("[WIFI:AP_MODE] ERROR: WiFi Scan failed.");
+
+        // What should we do to handle this? delete the scan?
+        WiFi.scanDelete();
+        return false;
+    }
+
+    /**
+     * If the result is 0 or greater, that means the scan completed,
+     * lets collect the results and store them into cachedWifiResultsJson
+     */
+    if (numNetworksFound >= 0 && cachedWifiResultsJson == "[]") {
         struct ScannedWifi {
             String ssid;
             int rssi;
@@ -41,11 +80,14 @@ bool wifi_net_is_scanning() {
         };
 
         std::vector<ScannedWifi> networks;
-        networks.reserve(n);
+        networks.reserve(numNetworksFound);
 
-        for (int i = 0; i < n; i++) {
+        // Iterate over found networks collecting details and generating results json.
+        for (int i = 0; i < numNetworksFound; i++) {
             String ssid = WiFi.SSID(i);
-            if (ssid.length() == 0) continue;
+            if (ssid.length() == 0) {
+                continue;
+            }
 
             int rssi = WiFi.RSSI(i);
             bool isOpen = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
@@ -66,12 +108,13 @@ bool wifi_net_is_scanning() {
             }
         }
 
+        // Sort by relative strength of the network signal.
         std::sort(networks.begin(), networks.end(), [](const ScannedWifi& a, const ScannedWifi& b) {
             return a.rssi > b.rssi;
         });
 
-        // Strictly limit to the top 30 strongest networks to protect RAM
-        size_t max_results = min(networks.size(), (size_t)30);
+        // Strictly limit to the top WIFI_MAX_NETWORKS_DISCOVERABLE (default 30) strongest networks to protect RAM
+        size_t max_results = min(networks.size(), (size_t)WIFI_MAX_NETWORKS_DISCOVERABLE);
 
         String json;
         json.reserve(max_results * 64);
@@ -84,20 +127,29 @@ bool wifi_net_is_scanning() {
         }
         json += "]";
 
+        // Store the result into cachedWifiResultsJson
         cachedWifiResultsJson = json;
+
+        // Delete/Cleanup the scan.
         WiFi.scanDelete();
     }
 
     return false;
 }
 
+/**
+ * @return JSON representation of found Wifi networks
+ * Format of:
+ * [
+ *      {"ssid": "ssid_here", "rssi": 1, "is_open": true/false},
+ *      ...
+ * ]
+ */
 String wifi_net_get_scan_results_json() {
     // Ensure any finished scan results are cached
     wifi_net_is_scanning();
     return cachedWifiResultsJson;
 }
-
-#include "status_led.h"
 
 void wifi_net_start_ap() {
     status_led_set(LED_SETUP_PATTERN);
@@ -110,6 +162,8 @@ void wifi_net_start_ap() {
 
     // Start the Web Server
     config_ui_start_server();
+
+    // Flip AP Mode flag to true.
     isApMode = true;
 }
 
@@ -230,24 +284,12 @@ void wifi_net_start_mdns(const BridgeConfig& cfg) {
     }
 }
 
-static unsigned long buttonPressStart = 0;
-
+/**
+ * Handle processing DNS requests if running in AP mode.
+ */
 void wifi_net_loop() {
     if (isApMode) {
         // Must be called repeatedly to handle DNS requests for the captive portal
         dnsServer.processNextRequest();
-    } else {
-        // Hold BOOT button for 2 seconds at runtime to enter Setup AP mode
-        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-            if (buttonPressStart == 0) {
-                buttonPressStart = millis();
-            } else if (millis() - buttonPressStart >= 2000) {
-                Serial.println("\n[BUTTON] BOOT button held for 2 seconds. Switching to Setup / Configuration Mode...");
-                buttonPressStart = 0;
-                wifi_net_start_ap();
-            }
-        } else {
-            buttonPressStart = 0;
-        }
     }
 }

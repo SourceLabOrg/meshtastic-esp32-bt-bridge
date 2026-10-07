@@ -56,11 +56,12 @@ To provide the best user experience, configuration is handled via a web-based ca
 meshtastic-esp32-bt-bridge/
 ├── .devcontainer/         # Docker dev environment definitions
 │   └── devcontainer.json
+├── .github/workflows/     # CI/CD pipelines (pr_check.yml, pages.yml, release.yml)
 ├── docs/                  # Additional documentation
 │   ├── architecture.md    # System architecture
 │   ├── bridge_architecture.md # Network & Bridge details
 │   ├── configuration_ui.md# Captive portal design
-│   ├── development.md     # Build guide
+│   ├── development.md     # Build guide & Release instructions
 │   └── user_guide.md      # End-user manual and LED reference
 ├── include/               # Header files
 ├── src/                   # C++ Source code
@@ -70,6 +71,7 @@ meshtastic-esp32-bt-bridge/
 │   ├── wifi_net.cpp       # WiFi, AP Mode, and mDNS management
 │   ├── config_ui.cpp      # Captive portal / Preferences logic
 │   └── status_led.cpp     # Asynchronous LED visual indicators
+├── web/                   # Zero-install Web Flasher UI (index.html)
 └── platformio.ini         # PlatformIO build configurations
 ```
 

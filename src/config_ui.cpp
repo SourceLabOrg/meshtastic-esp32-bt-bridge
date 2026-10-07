@@ -4,14 +4,26 @@
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include "build_options.h"
+#include "utils.h"
 
-bool g_debug_logs = false;
+/**
+ * For retrieving configuration properties stored in NVS.
+ */
 Preferences preferences;
+
+/**
+ * Webserver for Captive Portal/Setup UI.
+ */
 AsyncWebServer server(80);
 
+/**
+ * Defines the namespace which preferences are stored to NVS under.
+ */
 const char* PREF_NAMESPACE = "bridge_cfg";
 
-// The HTML for the modular captive portal
+/**
+ * The HTML for the modular captive portal
+ */
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -123,17 +135,17 @@ const char index_html[] PROGMEM = R"rawliteral(
         <option value="">-- Select or scan below --</option>
       </select>
       <button type="button" id="btn-scan" class="btn-secondary" onclick="scanBle()">🔍 Scan for Devices</button>
-      
+
       <input type="hidden" id="input-ble-name" value="">
-      
+
       <label>Target MAC Address:</label>
       <input type="text" id="input-ble-mac" placeholder="AA:BB:CC:DD:EE:FF">
-      
+
       <label>BLE PIN (6-digit):</label>
       <input type="number" id="input-ble-pin" min="0" max="999999" placeholder="123456">
-      
+
       <div id="ble-alert" class="alert"></div>
-      
+
       <button type="button" id="btn-test-ble" class="btn-warning" onclick="testBleConnection()">⚡ Test Connection</button>
       <div class="btn-group">
         <button class="btn-success" id="btn-save-ble" onclick="saveBle()">Save Bluetooth</button>
@@ -148,12 +160,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="card-title">🚀 System</div>
     </div>
     <div id="system-alert" class="alert"></div>
-    
+
     <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
       <label for="sys-debug-logs" style="margin-bottom:0;">Enable Serial Debug Logs</label>
       <input type="checkbox" id="sys-debug-logs" onchange="saveSystemSettings()" style="width:20px; height:20px;">
     </div>
-    
+
     <button class="btn-primary" id="btn-reboot" onclick="rebootBridge()">Reboot & Start Bridge</button>
     <button class="btn-danger" id="btn-reset" onclick="resetBridge()">Reset All Settings</button>
   </div>
@@ -651,10 +663,16 @@ const char index_html[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+/**
+ * Initialize the Configuration UI.
+ */
 void config_ui_init() {
     preferences.begin(PREF_NAMESPACE, false);
 }
 
+/**
+ * @return BridgeConfig preferences retrieved from NVS.
+ */
 BridgeConfig config_ui_load() {
     BridgeConfig cfg;
     cfg.wifi_ssid = preferences.getString("wifi_ssid", "");
@@ -663,10 +681,17 @@ BridgeConfig config_ui_load() {
     cfg.ble_mac = preferences.getString("ble_mac", "");
     cfg.ble_pin = preferences.getString("ble_pin", "");
     cfg.debug_logs = preferences.getBool("debug_logs", false);
+
+    // Set global debug log enable/disable flag.
     g_debug_logs = cfg.debug_logs;
+
+    // return config.
     return cfg;
 }
 
+/**
+ * Start the UI Captive Portal Server.
+ */
 void config_ui_start_server() {
     // Serve the main HTML page with explicit UTF-8 charset
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -677,11 +702,11 @@ void config_ui_start_server() {
     server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request){
         BridgeConfig cfg = config_ui_load();
         String json = "{";
-        json += "\"wifi_ssid\":\"" + cfg.wifi_ssid + "\",";
+        json += "\"wifi_ssid\":\"" + utils_escape_json(cfg.wifi_ssid) + "\",";
         json += "\"wifi_has_pass\":" + String(cfg.wifi_pass.length() > 0 ? "true" : "false") + ",";
-        json += "\"ble_name\":\"" + cfg.ble_name + "\",";
-        json += "\"ble_mac\":\"" + cfg.ble_mac + "\",";
-        json += "\"ble_pin\":\"" + cfg.ble_pin + "\",";
+        json += "\"ble_name\":\"" + utils_escape_json(cfg.ble_name) + "\",";
+        json += "\"ble_mac\":\"" + utils_escape_json(cfg.ble_mac) + "\",";
+        json += "\"ble_pin\":\"" + utils_escape_json(cfg.ble_pin) + "\",";
         json += "\"debug_logs\":" + String(cfg.debug_logs ? "true" : "false");
         json += "}";
         request->send(200, "application/json", json);
@@ -692,7 +717,7 @@ void config_ui_start_server() {
         wifi_net_start_scan();
         request->send(200, "application/json", "{\"status\": \"started\"}");
     });
-    
+
     // Poll for WiFi scan results
     server.on("/scan_wifi_results", HTTP_GET, [](AsyncWebServerRequest *request){
         if (wifi_net_is_scanning()) {
@@ -702,13 +727,13 @@ void config_ui_start_server() {
             request->send(200, "application/json", "{\"status\": \"done\", \"networks\": " + jsonResults + "}");
         }
     });
-    
+
     // Trigger the BLE scan asynchronously
     server.on("/start_scan", HTTP_GET, [](AsyncWebServerRequest *request){
         ble_client_start_scan();
         request->send(200, "application/json", "{\"status\": \"started\"}");
     });
-    
+
     // Poll for BLE scan results
     server.on("/scan_results", HTTP_GET, [](AsyncWebServerRequest *request){
         if (ble_client_is_scanning()) {
@@ -724,7 +749,7 @@ void config_ui_start_server() {
         if (request->hasParam("ble_mac", true) && request->hasParam("ble_pin", true)) {
             String mac = request->getParam("ble_mac", true)->value();
             String pin = request->getParam("ble_pin", true)->value();
-            
+
             ble_client_start_test(mac, pin);
             request->send(200, "application/json", "{\"status\":\"started\"}");
         } else {
@@ -786,7 +811,11 @@ void config_ui_start_server() {
     server.on("/save_system", HTTP_POST, [](AsyncWebServerRequest *request){
         if (request->hasParam("debug_logs", true)) {
             String val = request->getParam("debug_logs", true)->value();
+
+            // Update global debug log flag based on passed value
             g_debug_logs = (val == "true");
+
+            // Push into preferences.
             preferences.putBool("debug_logs", g_debug_logs);
             request->send(200, "application/json", "{\"success\":true}");
         } else {
@@ -809,31 +838,6 @@ void config_ui_start_server() {
         ESP.restart();
     });
 
-    // Legacy full form POST save
-    server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request){
-        if (request->hasParam("ssid", true) && request->hasParam("ble_mac", true) && request->hasParam("ble_pin", true)) {
-            String ssid = request->getParam("ssid", true)->value();
-            String pass = request->hasParam("pass", true) ? request->getParam("pass", true)->value() : "";
-            String ble_name = request->hasParam("ble_name", true) ? request->getParam("ble_name", true)->value() : "";
-            String ble_mac = request->getParam("ble_mac", true)->value();
-            String ble_pin = request->getParam("ble_pin", true)->value();
-            
-            preferences.putString("wifi_ssid", ssid);
-            if (pass.length() > 0) {
-                preferences.putString("wifi_pass", pass);
-            }
-            preferences.putString("ble_name", ble_name);
-            preferences.putString("ble_mac", ble_mac);
-            preferences.putString("ble_pin", ble_pin);
-            
-            request->send(200, "text/html", "<html><body><h2>Settings Saved!</h2><p>The bridge is rebooting...</p></body></html>");
-            delay(1500);
-            ESP.restart();
-        } else {
-            request->send(400, "text/plain", "Missing required parameters.");
-        }
-    });
-
     // Fallback for captive portal redirection
     server.onNotFound([](AsyncWebServerRequest *request){
         request->redirect("/");
@@ -842,6 +846,9 @@ void config_ui_start_server() {
     server.begin();
 }
 
+/**
+ * Shutdown the captive portal webserver.
+ */
 void config_ui_stop_server() {
     server.end();
 }
