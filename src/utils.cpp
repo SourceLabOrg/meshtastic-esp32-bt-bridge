@@ -3,18 +3,21 @@
 
 /**
  * Enable/Disable debug logging.
- * @param enable true to enable debug logging, false to disable
+ * @param enableDebugLogs true to enable debug logging, false to disable
  */
-void utils_set_debug_logging(bool enable) {
-    esp_log_level_set("*", enable ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+void utils_set_debug_logging(bool enableDebugLogs) {
+    if (enableDebugLogs) {
+        // Set default log level to INFO.
+        esp_log_level_set("*", ESP_LOG_INFO);
 
-    // Squelch exceptionally noisy libraries
-    if (enable) {
-        esp_log_level_set("wifi", ESP_LOG_INFO);
-        esp_log_level_set("wifi_init", ESP_LOG_INFO);
+        // Set the log level for our own application tag to debug.
+        esp_log_level_set(ARDUHAL_ESP_LOG_TAG, ESP_LOG_DEBUG);
     } else {
-        esp_log_level_set("wifi", ESP_LOG_WARN);
-        esp_log_level_set("wifi_init", ESP_LOG_WARN);
+        // Set default log level to warning.
+        esp_log_level_set("*", ESP_LOG_WARN);
+
+        // Set the log level for our own application tag to info.
+        esp_log_level_set(ARDUHAL_ESP_LOG_TAG, ESP_LOG_INFO);
     }
 }
 
