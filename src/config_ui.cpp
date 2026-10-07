@@ -5,6 +5,7 @@
 #include <ESPAsyncWebServer.h>
 #include "build_options.h"
 #include "utils.h"
+#include "esp_log.h"
 
 /**
  * For retrieving configuration properties stored in NVS.
@@ -683,7 +684,7 @@ BridgeConfig config_ui_load() {
     cfg.debug_logs = preferences.getBool("debug_logs", false);
 
     // Set global debug log enable/disable flag.
-    g_debug_logs = cfg.debug_logs;
+    utils_set_debug_logging(cfg.debug_logs);
 
     // return config.
     return cfg;
@@ -813,10 +814,11 @@ void config_ui_start_server() {
             String val = request->getParam("debug_logs", true)->value();
 
             // Update global debug log flag based on passed value
-            g_debug_logs = (val == "true");
+            bool enableDebug = (val == "true");
+            utils_set_debug_logging(enableDebug);
 
             // Push into preferences.
-            preferences.putBool("debug_logs", g_debug_logs);
+            preferences.putBool("debug_logs", enableDebug);
             request->send(200, "application/json", "{\"success\":true}");
         } else {
             request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing debug_logs parameter.\"}");
