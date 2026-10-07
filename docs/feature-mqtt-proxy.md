@@ -230,23 +230,61 @@ message MQTTConfig {
 
 ---
 
-## 7. Implementation Roadmap & Task Tracker
+## 7. Dependency & Submodule Management Strategy
+
+### 7.1 Decision: Git Submodule (`meshtastic/protobufs`)
+Rather than copying external source files into `src/` or depending on downstream third-party Arduino libraries, we integrate the official **`meshtastic/protobufs`** repository directly as a Git Submodule.
+
+* **Repository:** `https://github.com/meshtastic/protobufs.git`
+* **Submodule Path:** `proto/meshtastic`
+* **Target Version / Tag:** `v2.7.26` (Latest mature stable release track)
+
+### 7.2 Why This Approach Was Chosen
+1. **Canonical Source of Truth:** `meshtastic/protobufs` is the authoritative definition repo maintained by the Meshtastic core team.
+2. **Zero Repository Bloat:** No generated `.pb.h` or `.pb.c` files are committed into the project repository.
+3. **Selective Compilation:** Only the required proto definitions (`mesh.proto`, `mqtt.proto`, `module_config.proto`, `config.proto`, `portnums.proto`, `telemetry.proto`) are generated during the build.
+4. **Deterministic & Reproducible Builds:** Pinning to tag `v2.7.26` guarantees that upstream commits will never break builds unexpectedly.
+5. **Linker Dead-Code Elimination:** GCC/Clang with `-Wl,--gc-sections` automatically discards all unused structs and descriptors at link time, resulting in **0 bytes of RAM/Flash overhead** for unused modules.
+
+### 7.3 Submodule Maintenance & Upgrade Procedure
+* **Initial Clone / Checkout:**
+  ```bash
+  git submodule update --init --recursive
+  ```
+* **Upgrading to a Newer Meshtastic Release (e.g. `v2.8.x`):**
+  ```bash
+  cd proto/meshtastic
+  git fetch --tags
+  git checkout v2.8.x
+  cd ../..
+  git add proto/meshtastic
+  git commit -m "Upgrade Meshtastic protobufs to v2.8.x"
+  ```
+
+### 7.4 Build-Time Dynamic Code Generation
+PlatformIO dynamically generates the required Nanopb headers using a pre-build script (`extra_scripts = pre:generate_protos.py`). Generated C/H files are placed directly into the ephemeral `.pio/build/` directory and added to the compiler search path.
+
+---
+
+## 8. Implementation Roadmap & Task Tracker
 
 ### Phase 1: Planning & Research ✅
 - [x] Analyze ESP32-S3 feasibility, CPU, memory, and flash constraints.
 - [x] Investigate Meshtastic `MqttClientProxyMessage` and `MQTTConfig` protobuf specifications.
 - [x] Evaluate Auto-Sync from Radio vs. Manual WebUI configuration modes.
 - [x] Evaluate concurrency and collision prevention between TCP clients and MQTT proxy.
+- [x] Evaluate and document Git Submodule dependency management strategy (`v2.7.26`).
 - [x] Document architecture and design in `docs/feature-mqtt-proxy.md`.
 
-### Phase 2: Protobuf & Dependency Integration 🔲
-- [ ] Add lightweight protobuf runtime (`Nanopb-Arduino` or pre-compiled Meshtastic C headers).
-- [ ] Add `AsyncMqttClient` / `PubSubClient` / `esp-mqtt` dependency to `platformio.ini`.
-- [ ] Verify clean build on `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1`.
+### Phase 2: Protobuf & Dependency Integration ✅
+- [x] Add `nanopb/Nanopb @ ^0.4.7` to `platformio.ini`.
+- [x] Add `meshtastic/protobufs` Git submodule pinned to `v2.7.26` in `proto/meshtastic`.
+- [x] Implement `generate_protos.py` PlatformIO pre-script to compile needed protos dynamically into build directory.
+- [x] Verify clean build on `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1`.
 
 ### Phase 3: MQTT Client Subsystem (`mqtt_net`) 🔲
 - [ ] Create `include/mqtt_net.h` and `src/mqtt_net.cpp`.
-- [ ] Implement broker connection, reconnection backoff, keep-alive loop, and TLS support.
+- [ ] Implement broker connection, reconnection backoff, keep-alive loop, and TLS support using ESP-IDF `mqtt_client`.
 - [ ] Implement topic subscription matching (`<root>/#` or custom channels).
 - [ ] Implement message publishing from `MqttClientProxyMessage` payloads.
 - [ ] Implement radio `MQTTConfig` parser for Auto-Sync mode.

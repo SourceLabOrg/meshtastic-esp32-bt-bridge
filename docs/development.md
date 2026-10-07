@@ -4,14 +4,22 @@ This project is built using **PlatformIO**. Because you are using IntelliJ on ma
 
 *(Note: While we have a Docker DevContainer for pure compiling, flashing a USB device from inside a Docker container on macOS is notoriously difficult due to USB passthrough limitations. Therefore, a local installation of the CLI is highly recommended).*
 
-## 1. Install PlatformIO Core (macOS)
-You can install the PlatformIO CLI locally on your Mac using Homebrew. 
-
-Open your terminal and run:
+## 1. Prerequisites (macOS)
+You can install the PlatformIO CLI locally on your Mac using Homebrew:
 ```bash
 brew install platformio
 ```
 *(Alternatively, if you use Python, you can run `pip install platformio`)*
+
+### Protobuf & Submodule Setup
+This project uses the official Meshtastic Protobufs submodule and Nanopb. Ensure submodules are checked out and the required Python tools are installed:
+```bash
+# Initialize and fetch git submodules
+git submodule update --init --recursive
+
+# Install required Python protobuf generation packages
+pip install protobuf grpcio-tools
+```
 
 Verify the installation by running:
 ```bash
