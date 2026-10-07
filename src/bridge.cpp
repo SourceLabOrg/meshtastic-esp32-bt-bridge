@@ -66,7 +66,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
         ClientContext* ctx = (ClientContext*)arg;
         uint8_t* buf = (uint8_t*)data;
 
-        log_d("[Bridge-TCP] RX %zu bytes from %s\n", len, c->remoteIP().toString().c_str());
+        log_d("[Bridge-TCP] RX %zu bytes from %s", len, c->remoteIP().toString().c_str());
 
         // Protect against OOM (e.g., malicious stream or massive desync)
         if (ctx->rx_buffer.size() + len > 2048) {
@@ -92,7 +92,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
 
                 if (ctx->rx_buffer.size() - processed >= 4 + payload_len) {
                     // Valid full frame
-                    log_d("[Bridge-TCP] Parsed frame: len %u\n", payload_len);
+                    log_d("[Bridge-TCP] Parsed frame: len %u", payload_len);
                     BridgePacket packet;
                     packet.len = payload_len;
                     if (payload_len <= sizeof(packet.data)) {
@@ -153,7 +153,7 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     if (connectedClientsCount.load() == 0) {
         return;
     }
-    log_d("[Bridge-BLE] notifyFromRadio triggered with %zu bytes!\n", length);
+    log_d("[Bridge-BLE] notifyFromRadio triggered with %zu bytes!", length);
 
     // If the device notifies FromRadio directly
     if (length > 0) {
@@ -162,7 +162,7 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         if (length <= sizeof(packet.data)) {
             memcpy(packet.data, pData, length);
             if (xQueueSend(ble_to_tcp_queue, &packet, pdMS_TO_TICKS(50)) != pdTRUE) {
-                log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes from Notify\n", length);
+                log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes from Notify", length);
             }
         } else {
             log_e("[Bridge-BLE] ERROR: Notify Payload too large (%zu bytes)", length);
@@ -174,18 +174,21 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
 class BridgeRuntimeClientCallbacks : public NimBLEClientCallbacks {
 public:
     uint32_t onPassKeyRequest() override {
-        log_i("[Bridge-BLE] Passkey requested, providing PIN: %06u\n", targetBlePin);
+        log_i("[Bridge-BLE] Passkey requested, providing PIN: %06u", targetBlePin);
         return targetBlePin;
     }
 
     bool onConfirmPIN(uint32_t pin) override {
-        log_i("[Bridge-BLE] Confirming PIN: %06u\n", pin);
+        log_i("[Bridge-BLE] Confirming PIN: %06u", pin);
         return (pin == targetBlePin);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
-        log_i("[Bridge-BLE] Authentication complete. Encrypted: %d, Authenticated: %d\n",
-                      desc->sec_state.encrypted, desc->sec_state.authenticated);
+        log_i(
+            "[Bridge-BLE] Authentication complete. Encrypted: %d, Authenticated: %d",
+            desc->sec_state.encrypted,
+            desc->sec_state.authenticated
+        );
     }
 };
 
@@ -238,12 +241,12 @@ static void bridgeBleTask(void* parameter) {
 
                     if (fromNumChar && fromNumChar->canNotify()) {
                         bool sub = fromNumChar->subscribe(true, notifyFromNum);
-                        log_d("[Bridge-BLE] Subscribed to FromNum: %d\n", sub);
+                        log_d("[Bridge-BLE] Subscribed to FromNum: %d", sub);
                     }
 
                     if (fromRadioChar && fromRadioChar->canNotify()) {
                         bool sub = fromRadioChar->subscribe(true, notifyFromRadio);
-                        log_d("[Bridge-BLE] Subscribed to FromRadio: %d\n", sub);
+                        log_d("[Bridge-BLE] Subscribed to FromRadio: %d", sub);
                     }
                     log_i("[Bridge-BLE] BLE setup complete. Bridging active.");
                     status_led_set(LED_SOLID_ON);
@@ -262,11 +265,11 @@ static void bridgeBleTask(void* parameter) {
             TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
 
             if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
-                log_d("[Bridge-BLE] Writing %zu bytes to ToRadio...\n", packet.len);
+                log_d("[Bridge-BLE] Writing %zu bytes to ToRadio...", packet.len);
                 if (toRadioChar && toRadioChar->canWrite()) {
                     // Meshtastic ToRadio expects Write Without Response (false)
                     bool success = toRadioChar->writeValue(packet.data, packet.len, false);
-                    log_d("[Bridge-BLE] Write success: %d\n", success);
+                    log_d("[Bridge-BLE] Write success: %d", success);
                 }
             }
 
@@ -290,7 +293,7 @@ static void bridgeBleTask(void* parameter) {
                         lastPacket = currentVal;
                         lastPacketTime = millis();
 
-                        log_d("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!\n", currentVal.length());
+                        log_d("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!", currentVal.length());
 
                         BridgePacket rx_packet;
                         rx_packet.len = currentVal.length();
@@ -298,7 +301,7 @@ static void bridgeBleTask(void* parameter) {
                             memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
                             // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
                             if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
-                                log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes\n", rx_packet.len);
+                                log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
                             }
                         } else {
                             log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
@@ -327,7 +330,7 @@ static void bridgeNetTask(void* parameter) {
     while (bridgeRunning) {
         BridgePacket packet;
         if (xQueueReceive(ble_to_tcp_queue, &packet, pdMS_TO_TICKS(100)) == pdTRUE) {
-            log_d("[Bridge-Net] Broadcasting %zu bytes to %zu TCP clients\n", packet.len, connectedClientsCount.load());
+            log_d("[Bridge-Net] Broadcasting %zu bytes to %zu TCP client", packet.len, connectedClientsCount.load());
             // Build contiguous TCP frame to prevent fragmentation desyncs
             size_t frame_len = packet.len + 4;
             uint8_t frame[516]; // Max Meshtastic packet is 512 bytes + 4 byte header
@@ -389,7 +392,7 @@ void bridge_start() {
     bridgeRunning = true;
 
     tcpServer->begin();
-    log_i("[Bridge] TCP Server started on port %d\n", TCP_PORT);
+    log_i("[Bridge] TCP Server started on port %d", TCP_PORT);
 
     // Starts the BLE task and pins to CPU core 1
     xTaskCreatePinnedToCore(bridgeBleTask, "bridge_ble", 8192, NULL, 1, NULL, 1);

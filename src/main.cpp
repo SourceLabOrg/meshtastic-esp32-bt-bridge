@@ -26,7 +26,7 @@ void setup() {
     // Load stored configuration properties from NVS
     config_ui_init();
     BridgeConfig cfg = config_ui_load();
-    
+
     // Set global ESP-IDF log level based on UI setting
     utils_set_debug_logging(cfg.debug_logs);
 

@@ -58,7 +58,7 @@ void ble_client_start_scan() {
 
     if (!started) {
         isScanningFlag = false;
-        log_i("[BLE] Failed to start scan.");
+        log_e("[BLE] Failed to start scan.");
     }
 }
 
@@ -220,13 +220,13 @@ public:
 
     uint32_t onPassKeyRequest() override {
         passkeyPrompted = true;
-        log_i("[BLE] Passkey requested by server, providing PIN: %06u\n", activePasskey);
+        log_i("[BLE] Passkey requested by server, providing PIN: %06u", activePasskey);
         return activePasskey;
     }
 
     bool onConfirmPIN(uint32_t pin) override {
         passkeyPrompted = true;
-        log_i("[BLE] Confirming PIN: %06u\n", pin);
+        log_i("[BLE] Confirming PIN: %06u", pin);
         return (pin == activePasskey);
     }
 

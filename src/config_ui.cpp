@@ -682,11 +682,6 @@ BridgeConfig config_ui_load() {
     cfg.ble_mac = preferences.getString("ble_mac", "");
     cfg.ble_pin = preferences.getString("ble_pin", "");
     cfg.debug_logs = preferences.getBool("debug_logs", false);
-
-    // Set global debug log enable/disable flag.
-    utils_set_debug_logging(cfg.debug_logs);
-
-    // return config.
     return cfg;
 }
 
@@ -812,9 +807,9 @@ void config_ui_start_server() {
     server.on("/save_system", HTTP_POST, [](AsyncWebServerRequest *request){
         if (request->hasParam("debug_logs", true)) {
             String val = request->getParam("debug_logs", true)->value();
+            bool enableDebug = (val == "true");
 
             // Update global debug log flag based on passed value
-            bool enableDebug = (val == "true");
             utils_set_debug_logging(enableDebug);
 
             // Push into preferences.

@@ -1,6 +1,10 @@
 #include "utils.h"
 #include "esp_log.h"
 
+/**
+ * Enable/Disable debug logging.
+ * @param enable true to enable debug logging, false to disable
+ */
 void utils_set_debug_logging(bool enable) {
     esp_log_level_set("*", enable ? ESP_LOG_DEBUG : ESP_LOG_INFO);
 }
