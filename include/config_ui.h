@@ -13,7 +13,7 @@ struct BridgeConfig {
 
 extern bool g_debug_logs;
 
-// Initialize the Preferences (NVS) 
+// Initialize the Preferences (NVS)
 void config_ui_init();
 
 // Load the current configuration from NVS

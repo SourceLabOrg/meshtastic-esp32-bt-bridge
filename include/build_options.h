@@ -66,6 +66,14 @@
 #endif
 
 // -----------------------------------------
+// Wifi Settings
+// -----------------------------------------
+// Wifi Max networks to return from discovery scan.
+#ifndef WIFI_MAX_NETWORKS_DISCOVERABLE
+#define WIFI_MAX_NETWORKS_DISCOVERABLE 30
+#endif
+
+// -----------------------------------------
 // Bridge Settings
 // -----------------------------------------
 // Size of message queues between BLE <--> TCP Connections.
