@@ -9,7 +9,7 @@
 #include <atomic>
 
 struct BridgePacket {
-    uint8_t data[512]; // Max Meshtastic protobuf size
+    uint8_t data[MESHTASTIC_MAX_PACKET_SIZE]; // Max Meshtastic ToRadio envelope / packet size
     size_t len;
 };
 
@@ -410,7 +410,7 @@ static void bridgeNetTask(void* parameter) {
             log_d("[Bridge-Net] Broadcasting %zu bytes to %zu TCP client", packet.len, connectedClientsCount.load());
             // Build contiguous TCP frame to prevent fragmentation desyncs
             size_t frame_len = packet.len + 4;
-            uint8_t frame[516]; // Max Meshtastic packet is 512 bytes + 4 byte header
+            uint8_t frame[MESHTASTIC_MAX_PACKET_SIZE + 4]; // Max packet size + 4-byte header
 
             if (frame_len <= sizeof(frame)) {
                 frame[0] = 0x94;

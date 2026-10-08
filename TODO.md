@@ -25,4 +25,5 @@
 ## Outstanding Features & Future Roadmap
 *   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
 *   periodically poll queue sizes and log when reaches a high water mark (IE queue X is 75% full) (maybe even expose via webui)
-*   DRY out notifyFromRadio() and bridgeBleTask()  in bridge.cpp?
+*   DRY out notifyFromRadio() and bridgeBleTask() in bridge.cpp?
+*   **MQTT Proxy Fallback Policy:** Decide whether `MqttClientProxyMessage` uplink packets should be dropped or allowed to fall through to TCP clients when the bridge's MQTT Gateway is enabled but the broker connection is temporarily offline.

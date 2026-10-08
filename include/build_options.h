@@ -81,6 +81,11 @@
 // -----------------------------------------
 // Bridge Settings
 // -----------------------------------------
+// Maximum binary packet size for Meshtastic ToRadio envelopes (512B payload + topic/metadata headers).
+#ifndef MESHTASTIC_MAX_PACKET_SIZE
+#define MESHTASTIC_MAX_PACKET_SIZE 576
+#endif
+
 // Size of message queues between BLE <--> TCP Connections.
 #ifndef BRIDGE_QUEUE_SIZE
 #define BRIDGE_QUEUE_SIZE 100
@@ -112,6 +117,11 @@
 // Internal MQTT client buffer size
 #ifndef MQTT_CLIENT_BUFFER_SIZE
 #define MQTT_CLIENT_BUFFER_SIZE 2048
+#endif
+
+// Maximum allowable length for custom CA root certificate in PEM format (NVS limit is 4000)
+#ifndef MQTT_MAX_CUSTOM_CA_LENGTH
+#define MQTT_MAX_CUSTOM_CA_LENGTH 3500
 #endif
 
 // -----------------------------------------

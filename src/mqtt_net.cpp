@@ -257,8 +257,16 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
             memcpy(proxy_msg->payload_variant.data.bytes, event->data, copyLen);
             proxy_msg->payload_variant.data.size = copyLen;
 
-            // Encode into stack buffer
-            uint8_t to_radio_buf[512];
+            /*
+             * Encode into stack buffer.
+             * Sized to MESHTASTIC_MAX_PACKET_SIZE to comfortably fit the full ToRadio envelope:
+             *   - Max payload: 512 bytes
+             *   - Topic string: up to 32 bytes
+             *   - Retained flag: 2 bytes
+             *   - Protobuf tags & length headers: ~10 bytes
+             * Total encoded ToRadio envelope can reach ~556 bytes.
+             */
+            uint8_t to_radio_buf[MESHTASTIC_MAX_PACKET_SIZE];
             pb_ostream_t stream = pb_ostream_from_buffer(to_radio_buf, sizeof(to_radio_buf));
             if (pb_encode(&stream, meshtastic_ToRadio_fields, &to_radio)) {
                 downlinkCallback(to_radio_buf, stream.bytes_written);
@@ -410,11 +418,11 @@ static void mqtt_net_stop_client() {
 static void mqtt_net_start_synced_client() {
     MqttLockGuard lock;
     if (!currentConfig.enabled) {
-        log_i("[MQQT] Refusing to start MQTT client, MQTT Gateway feature is disabled.");
+        log_i("[MQTT] Refusing to start MQTT client, MQTT Gateway feature is disabled.");
         return;
     }
     if (!currentStatus.radio_proxy_enabled) {
-        log_i("[MQQT] Refusing to start MQTT client, MQTT Proxy is disabled on radio.");
+        log_i("[MQTT] Refusing to start MQTT client, MQTT Proxy is disabled on radio.");
         return;
     }
     String server = currentStatus.radio_server.isEmpty() ? "mqtt.meshtastic.org" : currentStatus.radio_server;

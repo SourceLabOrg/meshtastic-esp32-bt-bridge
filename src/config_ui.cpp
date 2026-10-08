@@ -210,7 +210,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       <div style="margin: 10px 0;">
         <label style="margin-bottom:4px;">Custom CA Certificate (Optional PEM):</label>
-        <textarea id="input-mqtt-ca" rows="4" style="width:100%; padding:8px; border:1px solid #ccd0d5; border-radius:6px; font-family:monospace; font-size:11px; resize:vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        <textarea id="input-mqtt-ca" rows="4" maxlength="3500" style="width:100%; padding:8px; border:1px solid #ccd0d5; border-radius:6px; font-family:monospace; font-size:11px; resize:vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
         <div style="display:flex; gap:8px; margin-top:4px;">
           <input type="file" id="file-mqtt-ca" accept=".pem,.crt,.cer" style="display:none;" onchange="loadCaFile(this)">
           <button type="button" class="btn-secondary" style="flex:1; padding:6px; font-size:12px; margin:0;" onclick="document.getElementById('file-mqtt-ca').click()">📂 Load Cert File</button>
@@ -341,6 +341,11 @@ const char index_html[] PROGMEM = R"rawliteral(
       const enabled = document.getElementById('input-mqtt-enabled').checked;
       const tls_insecure = document.getElementById('input-mqtt-tls-insecure').checked;
       const custom_ca = document.getElementById('input-mqtt-ca').value.trim();
+
+      if (custom_ca.length > 3500) {
+        showAlert('mqtt-alert', 'error', 'Custom CA certificate is too large (max 3500 characters).');
+        return;
+      }
 
       let body = 'mqtt_enabled=' + (enabled ? 'true' : 'false') +
                  '&mqtt_tls_insecure=' + (tls_insecure ? 'true' : 'false') +
@@ -893,6 +898,9 @@ void config_ui_start_server() {
         bool enabled = request->hasParam("mqtt_enabled", true) && (request->getParam("mqtt_enabled", true)->value() == "true");
         bool tlsInsecureVal = request->hasParam("mqtt_tls_insecure", true) && (request->getParam("mqtt_tls_insecure", true)->value() == "true");
         String customCaVal = request->hasParam("mqtt_custom_ca", true) ? request->getParam("mqtt_custom_ca", true)->value() : "";
+        if (customCaVal.length() > MQTT_MAX_CUSTOM_CA_LENGTH) {
+            customCaVal = customCaVal.substring(0, MQTT_MAX_CUSTOM_CA_LENGTH);
+        }
 
         preferences.putBool("mqtt_enabled", enabled);
         preferences.putBool("mqtt_tls_insec", tlsInsecureVal);
