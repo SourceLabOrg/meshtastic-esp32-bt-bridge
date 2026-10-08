@@ -13,12 +13,23 @@ struct BridgePacket {
     size_t len;
 };
 
-// Queues for inter-task communication
+/**
+ * Queue for sending packets from TCP -> BLE.
+ */
+static StaticQueue_t tcp_to_ble_queue_struct;
+static uint8_t tcp_to_ble_queue_storage[BRIDGE_QUEUE_SIZE * sizeof(BridgePacket)];
 static QueueHandle_t tcp_to_ble_queue = NULL;
+
+/**
+ * Queue for sending packets from BLE -> TCP.
+ */
+static StaticQueue_t ble_to_tcp_queue_struct;
+static uint8_t ble_to_tcp_queue_storage[BRIDGE_QUEUE_SIZE * sizeof(BridgePacket)];
 static QueueHandle_t ble_to_tcp_queue = NULL;
 
-// Statically allocated MQTT downlink queue (.bss segment)
-// TODO migrate the other 2 queues to .bss static memory
+/**
+ * Queue for sending MQTT packets from MQTT broker -> BLE.
+ */
 static StaticQueue_t mqtt_to_ble_queue_struct;
 static uint8_t mqtt_to_ble_queue_storage[MQTT_QUEUE_SIZE * sizeof(BridgePacket)];
 static QueueHandle_t mqtt_to_ble_queue = NULL;
@@ -469,12 +480,27 @@ void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     targetBleMac = ble_mac;
     targetBlePin = ble_pin;
 
-    // Queues to handle high-speed bursts of Meshtastic Node DB packets
-    // Holds up to BRIDGE_QUEUE_SIZE (defaults 100) "packets" of data
-    tcp_to_ble_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
-    ble_to_tcp_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
+    /**
+     * Queues for passing packets between BLE <--> TCP.
+     * Statically allocate FreeRTOS queues in .bss segment (zero heap fragmentation)
+     * Holds up to BRIDGE_QUEUE_SIZE (defaults 100) "packets" of data
+     */
+    tcp_to_ble_queue = xQueueCreateStatic(
+        BRIDGE_QUEUE_SIZE,
+        sizeof(BridgePacket),
+        tcp_to_ble_queue_storage,
+        &tcp_to_ble_queue_struct
+    );
+    ble_to_tcp_queue = xQueueCreateStatic(
+        BRIDGE_QUEUE_SIZE,
+        sizeof(BridgePacket),
+        ble_to_tcp_queue_storage,
+        &ble_to_tcp_queue_struct
+    );
 
-    // Statically allocate MQTT downlink queue in .bss segment (zero heap fragmentation)
+    /**
+     * Queue for passing packets from MQTT broker -> BLE.
+     */
     mqtt_to_ble_queue = xQueueCreateStatic(
         MQTT_QUEUE_SIZE,
         sizeof(BridgePacket),
