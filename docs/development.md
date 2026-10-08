@@ -95,30 +95,36 @@ build_flags =
 - `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration. (Default: `4`).
 - `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to keep in memory from discovery scan. (Default: `60`).
 - `WIFI_MAX_NETWORKS_DISCOVERABLE`: Maximum number of WiFi networks to keep in memory from discovery scan. (Default: `30`).
-- `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `100` on ESP32-S3, `48` on `esp32dev`).
-- `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `40` on ESP32-S3, `24` on `esp32dev`).
+- `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `32`).
+- `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `16`).
 
 ### Static FreeRTOS Queues & RAM Sizing Math
 All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, and `mqtt_to_ble_queue`) are statically allocated in the `.bss` segment using `xQueueCreateStatic` to prevent runtime dynamic heap fragmentation and eliminate Out-Of-Memory crashes.
 
-Each `BridgePacket` holds a 512-byte payload plus length metadata ($\approx 520\text{ bytes}$).
+Each `BridgePacket` holds a 576-byte payload plus length metadata ($\approx 584\text{ bytes}$).
 
-#### 1. ESP32-S3 Boards (`seeed_xiao_esp32s3`, `esp32-s3-devkitc-1`)
-* **Hardware SRAM:** 320 KB contiguous internal SRAM.
+#### Unified Sane Sizing Across All ESP32 & ESP32-S3 Targets
 * **Queue Allocations:**
-  - `tcp_to_ble_queue`: $100 \text{ packets} \times 520\text{ B} = 52.0\text{ KB}$
-  - `ble_to_tcp_queue`: $100 \text{ packets} \times 520\text{ B} = 52.0\text{ KB}$
-  - `mqtt_to_ble_queue`: $40 \text{ packets} \times 520\text{ B} = 20.8\text{ KB}$
-  - **Total Static Queue RAM:** $\approx 124.8\text{ KB}$ (54.5% total DRAM used, leaving $>140\text{ KB}$ of runtime heap).
+  - `tcp_to_ble_queue`: $32 \text{ packets} \times 584\text{ B} = 18.7\text{ KB}$
+  - `ble_to_tcp_queue`: $32 \text{ packets} \times 584\text{ B} = 18.7\text{ KB}$
+  - `mqtt_to_ble_queue`: $16 \text{ packets} \times 584\text{ B} = 9.3\text{ KB}$
+  - **Total Static Queue RAM:** $\approx 46.7\text{ KB}$ in `.bss`.
+* **Runtime Free Heap Footprint:**
+  - **Seeed XIAO ESP32-S3:** **~106 KB free heap** (Min: ~88 KB, MaxBlock: ~95 KB).
+  - **Classic ESP32 (`esp32dev`):** **~95 KB free heap** (Min: ~78 KB, MaxBlock: ~80 KB).
+* **Why This Matters:** LwIP networking, AsyncWebServer, and MbedTLS require ~15 KB of contiguous free memory. Sizing the queues to 32/16 ensures $>5\times$ safety margin on all targets without risking memory exhaustion or socket starvation.
 
-#### 2. Classic ESP32 Boards (`esp32dev` / WROOM-32)
-* **Hardware Architecture:** The original ESP32 reserves $\approx 130\text{ KB}$ of internal DRAM for its Bluetooth Classic baseband controller, ROM tables, and WiFi MAC/PHY, leaving $\approx 180\text{ KB}$ of total application DRAM (`dram0_0_seg`).
-* **Why 100-packet queues caused linker overflow:** A 124.8 KB static queue allocation combined with framework globals exceeded the linker's fixed static DRAM boundary by ~57 KB.
-* **Board-Specific Sizing in `platformio.ini`:**
-  - `BRIDGE_QUEUE_SIZE = 48`: $48 \times 520\text{ B} = 24.9\text{ KB}$ per queue ($49.8\text{ KB}$ total).
-  - `MQTT_QUEUE_SIZE = 24`: $24 \times 520\text{ B} = 12.5\text{ KB}$.
-  - **Total Static Queue RAM:** $\approx 62.3\text{ KB}$ (saves $62.5\text{ KB}$ of DRAM).
-* **Result:** `esp32dev` compiles with zero static DRAM overflow and retains $\approx 90\text{ KB}$ of free runtime heap for TLS negotiation (`mbedtls`), AsyncTCP buffers, and WebUI requests.
+### Task Prioritization & Multithreading Architecture
+To prevent high-bandwidth network traffic from starving BLE operations or locking up the WebUI:
+
+| Task Name | Core | Priority | Stack Size | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| **`LwIP / TCP Stack`** | Core 0 | **18** | System | Internal ESP-IDF IP/MAC networking stack |
+| **`AsyncTCP Worker`** | Core 0 | **3** | System | Handles async socket read/write events and WebUI endpoints |
+| **`mqtt_client` Task** | Core 0 | **2** | 8192 B | Background MQTT networking and TLS processing |
+| **`bridgeNetTask`** | Core 0 | **1** | 4096 B | Network broadcast task (drains `ble_to_tcp_queue` to TCP sockets) |
+| **`diag_telemetry`** | Core 0 | **1** | 3072 B | Periodic diagnostic task (15s interval) |
+| **`bridgeBleTask`** | Core 1 | **1** | 8192 B | BLE Engine (polls `FromRadio`, handles `FromNum`, writes to `ToRadio`) |
 
 ---
 ## 7. Logging & Debugging

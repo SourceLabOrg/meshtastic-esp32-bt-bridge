@@ -137,7 +137,7 @@ To prevent high-volume MQTT mesh traffic from blocking interactive phone app com
 
 ```text
 ┌─────────────────────────┐
-│ TCP Client (Phone App)  │ ──► [ tcp_to_ble_queue (Size: 100) ] ──┐ (Priority 1: High)
+│ TCP Client (Phone App)  │ ──► [ tcp_to_ble_queue (Size: 32) ] ───┐ (Priority 1: High)
 └─────────────────────────┘                                        │
                                                                    ▼
                                                            ┌────────────────┐
@@ -145,15 +145,15 @@ To prevent high-volume MQTT mesh traffic from blocking interactive phone app com
                                                            └────────────────┘
                                                                    ▲
 ┌─────────────────────────┐                                        │
-│ MQTT Broker Downlink    │ ──► [ mqtt_to_ble_queue (Size: 40) ] ──┘ (Priority 2: Normal)
+│ MQTT Broker Downlink    │ ──► [ mqtt_to_ble_queue (Size: 16) ] ──┘ (Priority 2: Normal)
 └─────────────────────────┘
 ```
 
 1. **`tcp_to_ble_queue` (High Priority):** Carries locally generated phone app commands and chat packets. `bridgeBleTask` always checks and drains this queue first.
-2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty.
+2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty. Uses non-blocking `xQueueSend(..., 0)` to prevent blocking the MQTT networking loop.
 3. **Static Allocation (.bss segment):** All packet queues are statically reserved with zero dynamic `malloc` overhead:
-   * **ESP32-S3:** `BRIDGE_QUEUE_SIZE = 100` (58.4 KB each), `MQTT_QUEUE_SIZE = 40` (23.4 KB) — total ~140 KB `.bss` queue RAM.
-   * **ESP32 Classic (`esp32dev`):** `BRIDGE_QUEUE_SIZE = 32` (18.7 KB each), `MQTT_QUEUE_SIZE = 16` (9.3 KB) — total ~46.7 KB `.bss` queue RAM, preserving ~50 KB+ of runtime free heap for TLS and networking.
+   * **Unified Default Sizing:** `BRIDGE_QUEUE_SIZE = 32` (18.7 KB each), `MQTT_QUEUE_SIZE = 16` (9.3 KB) — total ~46.7 KB `.bss` queue RAM.
+   * **Runtime Headroom:** Preserves **~106 KB free heap on ESP32-S3** and **~95 KB on Classic ESP32 (`esp32dev`)**, preventing heap starvation during simultaneous TLS handshakes, mDNS resolution, and WebUI HTTP serving.
 
 ### 4.6 Connection Lifecycle & Disconnect Grace Period Model
 
@@ -162,15 +162,15 @@ flowchart TD
     A[ESP32 Normal Boot] --> B[Connect to WiFi Station]
     B --> C{Bluetooth Connected?}
     C -- No --> D[Set State: Waiting for Radio<br>Broker Connection Deferred]
-    C -- Yes --> E[Wait for FromRadio.moduleConfig.mqtt]
+    C -- Yes --> E[Request Radio Config want_config_id<br>Wait for FromRadio.moduleConfig.mqtt]
     D -->|BLE Connects & Subscribes| E
     E -->|Config Received + proxy_to_client_enabled=true| F[Connect to Synced Broker]
     F --> G[MQTT Active & Subscribed]
     G --> H{Bluetooth Drops?}
     H -- No --> G
     H -- Yes --> I[Start 60s Grace Timer<br>Buffer Downlink in mqtt_to_ble_queue]
-    I --> J{Queue > 40 Packets?}
-    J -- Yes --> K[Drop Extra Packets + Log Warning]
+    I --> J{Queue > 16 Packets?}
+    J -- Yes --> K[Drop Extra Packets + Increment Drop Counter]
     J -- No --> L[Retain Buffered Packets]
     K --> M{Timer > 60s?}
     L --> M
@@ -186,13 +186,13 @@ flowchart TD
 ```
 
 #### Detailed Lifecycle & State Transition Rules:
-1. **Bluetooth-Gated Broker Startup:**
-   * On initial boot, the bridge waits for the Bluetooth link to establish and for `FromRadio.moduleConfig.mqtt` to arrive (`bridge_is_ble_connected() == true`).
+1. **Bluetooth-Gated Broker Startup & Immediate Query:**
+   * On initial boot, the bridge waits for the Bluetooth link to establish and immediately sends a `want_config_id` packet over BLE to prompt the radio for its `ModuleConfig.mqtt` configuration.
    * The MQTT client starts only if `proxy_to_client_enabled == true` on the radio.
 2. **Bluetooth Disconnect Grace Period (Default: 60 Seconds):**
    * If Bluetooth drops, the bridge starts a 60-second grace timer (`MQTT_BLE_GRACE_PERIOD_SECONDS`).
-   * The MQTT broker TCP/TLS socket **remains open**, allowing up to 40 incoming downlink packets to buffer in `mqtt_to_ble_queue`.
-   * **Queue Saturation:** If 40 packets accumulate before BLE reconnects, subsequent packets are dropped with a warning log.
+   * The MQTT broker TCP/TLS socket **remains open**, allowing up to 16 incoming downlink packets to buffer in `mqtt_to_ble_queue`.
+   * **Queue Saturation:** If 16 packets accumulate before BLE reconnects, subsequent packets are dropped with a warning log and recorded on the drop counter (`msgs_dropped`).
 3. **Grace Timer Expiry (> 60 Seconds):**
    * If BLE remains disconnected past 60 seconds, the MQTT client is stopped (`mqtt_net_stop_client()`), `mqtt_to_ble_queue` is cleared via `xQueueReset()`, and state switches to `MQTT_STATE_WAITING_RADIO_CONFIG`.
 4. **Fast Reconnect & Config Change Detection:**
@@ -218,8 +218,8 @@ flowchart TD
 
 | Build Flag | Default | Description |
 | :--- | :--- | :--- |
-| `BRIDGE_QUEUE_SIZE` | `100` (S3) / `32` (Classic) | Statically allocated packet capacity for TCP <-> BLE message queues |
-| `MQTT_QUEUE_SIZE` | `40` (S3) / `16` (Classic) | Statically allocated packet buffer capacity for MQTT downlink messages |
+| `BRIDGE_QUEUE_SIZE` | `32` | Statically allocated packet capacity for TCP <-> BLE message queues |
+| `MQTT_QUEUE_SIZE` | `16` | Statically allocated packet buffer capacity for MQTT downlink messages |
 | `MQTT_BLE_GRACE_PERIOD_SECONDS` | `60` | Duration to keep MQTT broker alive during transient Bluetooth disconnects |
 
 ### 5.3 WebUI Design & Components

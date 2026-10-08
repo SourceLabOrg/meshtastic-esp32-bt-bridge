@@ -31,14 +31,20 @@ Meshtastic devices utilize different BLE address types depending on the manufact
 
 ## C++ ESP32 Implementation Strategy
 
-### 1. Multithreading & Tasks
-Because BLE operations (connecting, reading characteristics) can block, and we are using `ESPAsyncTCP` (which runs on Core 0), we separate concerns using FreeRTOS tasks and static queues:
-- **Core 0 (Network & MQTT Background)**:
-  - TCP Server (port 4403): Parses incoming TCP streams, creates frames, and pushes to `tcp_to_ble_queue`. Broadcasts outgoing frames from `ble_to_tcp_queue` to connected clients.
-  - MQTT Client (`esp-mqtt`): Receives downlink messages from broker, packs them into `ToRadio` protobufs, and pushes to `mqtt_to_ble_queue`.
-- **Core 1 (BLE Engine)**:
-  - Dedicated `bridgeBleTask`: Maintains the BLE connection, polls `FromRadio`, and routes uplink packets to `mqtt_net_handle_from_radio()` and `ble_to_tcp_queue`.
-  - **Dual-Queue Downlink Prioritization**: Checks high-priority `tcp_to_ble_queue` (app chat/commands) first, then drains normal-priority `mqtt_to_ble_queue` (background MQTT downlink) to write to `ToRadio`.
+### 1. Multithreading, Tasks & Core Pinning
+Because BLE operations (connecting, reading characteristics) can block, and we are using `ESPAsyncTCP` (which runs on Core 0), we separate concerns using FreeRTOS tasks, strict priorities, and static queues:
+
+| Task Name | Core | Priority | Stack Size | Purpose / Responsibilities |
+| :--- | :---: | :---: | :---: | :--- |
+| **`LwIP / TCP Stack`** | Core 0 | **18** | System | Internal ESP-IDF IP/MAC networking stack. |
+| **`AsyncTCP Worker`** | Core 0 | **3** | System | Handles async socket read/write events and WebUI endpoints. |
+| **`mqtt_client` Task** | Core 0 | **2** | 8192 B | Background MQTT networking, keepalive pings, and TLS processing. |
+| **`bridgeNetTask`** | Core 0 | **1** | 4096 B | Network broadcast task: drains `ble_to_tcp_queue` and writes framed packets to connected TCP clients under `tcpClientsMutex`. |
+| **`diag_telemetry`** | Core 0 | **1** | 3072 B | Periodic background task (15s): outputs atomic single-line health diagnostics (Heap, Min/MaxBlock, WiFi RSSI, TCP clients, Queue wait/capacity/drops, Task Stacks, MQTT status). |
+| **`bridgeBleTask`** | Core 1 | **1** | 8192 B | BLE Engine: manages connection/reconnection, polls `FromRadio`, handles `FromNum` notifications, inspects/routes uplink packets via `mqtt_net_handle_from_radio()`, and writes prioritized packets (`tcp_to_ble_queue` then `mqtt_to_ble_queue`) to `ToRadio`. Yields 1ms (`vTaskDelay(1)`) each cycle for co-located tasks. |
+
+> [!NOTE]
+> **Priority Hierarchy Rationale:** Keeping `mqtt_client` at Priority 2 (below `AsyncTCP` at 3 and LwIP at 18) guarantees that heavy TLS/MQTT operations will never starve WebUI interactions or incoming TCP socket connections. Giving `bridgeNetTask`, `bridgeBleTask`, and `diag_telemetry` Priority 1 ensures equal round-robin scheduling for bridging and telemetry.
 
 ### 2. BLE Interaction Flow
 - **Connect**: Scan and connect to the configured BLE MAC address (`cfg.ble_mac`).
@@ -57,20 +63,20 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ### 3. Reconnection, Grace Period & Stability
 - **60-Second Disconnect Grace Period**: If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for 60 seconds and buffers incoming messages in `mqtt_to_ble_queue`. If BLE reconnects within 60s, the session is preserved with 0 dropped messages. If 60s elapses, the client is cleanly disconnected and the queue is cleared.
-- MTU Negotiation: We request an MTU of at least 512 bytes during the BLE connection phase to support maximum Meshtastic protobuf payloads.
+- **MTU Negotiation**: We request an MTU of at least 512 bytes during the BLE connection phase to support maximum Meshtastic protobuf payloads.
 
 ### 4. Memory Management (100% Static `.bss` Queues)
 - **Zero Heap Fragmentation**: All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, `mqtt_to_ble_queue`) are allocated statically in `.bss` via `xQueueCreateStatic`.
 - **Packet Sizing (`MESHTASTIC_MAX_PACKET_SIZE = 576`)**: `BridgePacket` uses a fixed `uint8_t data[576]` array (584 bytes per slot aligned), accounting for max 512-byte payload + 32-byte topic + headers. TCP frames use stack memory (`uint8_t frame[580]`), ensuring zero dynamic `malloc`/`free` calls in fast-path routing.
-- **Target-Specific Queue Sizing & DRAM Sizing**:
-  - **ESP32-S3 Targets** (`seeed_xiao_esp32s3`, `esp32-s3-devkitc-1` with 512 KB SRAM):
-    - `BRIDGE_QUEUE_SIZE = 100` (58.4 KB per queue)
-    - `MQTT_QUEUE_SIZE = 40` (23.4 KB)
-    - Total static queue memory: ~140 KB with abundant DRAM headroom.
-  - **ESP32 Classic Targets** (`esp32dev` / WROOM-32 with 320 KB SRAM):
-    - `BRIDGE_QUEUE_SIZE = 32` (18.7 KB per queue)
-    - `MQTT_QUEUE_SIZE = 16` (9.3 KB)
-    - Total static queue memory: ~46.7 KB in `.bss`, leaving ~50 KB+ of free runtime heap for TLS handshakes and socket buffers.
+- **Unified Sane Queue Sizing Across All Targets**:
+  - `BRIDGE_QUEUE_SIZE = 32` (18.7 KB per queue)
+  - `MQTT_QUEUE_SIZE = 16` (9.3 KB)
+  - **Total Static Queue RAM:** ~46.7 KB in `.bss`.
+  - **Runtime Heap Benefits:** Leaves **~106 KB free heap on ESP32-S3** and **~95 KB on Classic ESP32 (`esp32dev`)**, providing abundant headroom (>5x the ~15 KB needed for LwIP/TLS) and completely eliminating heap exhaustion when TLS, AsyncTCP, and the WebUI run simultaneously.
+- **Queue Drop Telemetry & Backpressure Strategy**:
+  - `tcp_to_ble_queue`: 100ms backpressure timeout; drops and increments `tcp_to_ble_dropped` if full.
+  - `ble_to_tcp_queue`: 50ms backpressure timeout; drops and increments `ble_to_tcp_dropped` if full.
+  - `mqtt_to_ble_queue`: 0ms non-blocking timeout; drops immediately and increments `mqtt_to_ble_dropped` (`msgs_dropped`) to prevent stalling the MQTT event loop.
 
 ### 5. Client Limits & Auto-Discovery
 - **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.

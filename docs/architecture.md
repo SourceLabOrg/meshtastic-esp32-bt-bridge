@@ -70,6 +70,7 @@ meshtastic-esp32-bt-bridge/
 │   ├── bridge.h
 │   ├── build_options.h
 │   ├── config_ui.h
+│   ├── diag_telemetry.h   # Periodic health and queue diagnostics
 │   ├── mqtt_net.h         # MQTT subsystem interface & state types
 │   ├── status_led.h
 │   ├── utils.h
@@ -78,6 +79,7 @@ meshtastic-esp32-bt-bridge/
 │   ├── main.cpp           # Main application loop
 │   ├── bridge.cpp         # Logic for bridging TCP, MQTT, and BLE streams (dual queues)
 │   ├── ble_client.cpp     # NimBLE client and security callbacks
+│   ├── diag_telemetry.cpp # Low-priority periodic telemetry logger
 │   ├── mqtt_net.cpp       # MQTT Gateway subsystem (Auto-Sync, 3-tier TLS)
 │   ├── wifi_net.cpp       # WiFi, AP Mode, and mDNS management
 │   ├── config_ui.cpp      # Captive portal / Preferences logic

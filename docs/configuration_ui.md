@@ -54,9 +54,9 @@ The UI is built with a clean, modular card-based interface that allows inspectin
    * A `DNSServer` intercepts DNS queries and redirects captive portal clients to `http://192.168.4.1/`.
 
 2. **Web Server Endpoints (`config_ui.cpp`)**:
-   * **`GET /`**: Serves the single-page HTML/CSS/JS application with explicit UTF-8 encoding.
-   * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_insecure":false,"mqtt_custom_ca":"..."}`.
-   * **`GET /mqtt_status`**: Returns live MQTT gateway telemetry JSON: `{"state":"CONNECTED","active_server":"...","active_port":8883,"published":12,"received":45,...}`.
+   * **`GET /`**: Serves the single-page HTML/CSS/JS application directly from flash (`PROGMEM`) via `AsyncProgmemResponse` with zero heap allocation.
+   * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_tls_insecure":false,"mqtt_custom_ca":"..."}`.
+   * **`GET /mqtt_status`**: Returns live MQTT gateway telemetry JSON polled every 6 seconds by the client: `{"state":"CONNECTED","radio_proxy_enabled":true,"active_server":"...","active_port":8883,"active_tls":true,"published":12,"received":45,"dropped":0,...}`.
    * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
    * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
    * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.
@@ -65,7 +65,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
    * **`GET /test_ble_status`**: Polls the test task state and returns result JSON (`{"status":"done","success":true,"message":"..."}`).
    * **`POST /save_wifi`**: Saves `wifi_ssid` and `wifi_pass` to NVS.
    * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS.
-   * **`POST /save_mqtt`**: Saves `mqtt_enabled`, `mqtt_insecure`, and `mqtt_custom_ca` to NVS and applies changes live.
+   * **`POST /save_mqtt`**: Saves `mqtt_enabled`, `mqtt_tls_insec`, and `mqtt_custom_ca` to NVS and applies changes live if in Normal mode.
    * **`POST /save_system`**: Saves `debug_logs` boolean flag to NVS.
    * **`POST /reboot`**: Restarts the ESP32 into normal bridge mode.
    * **`POST /reset`**: Erases all stored NVS configurations and reboots the ESP32 into Setup Mode.
@@ -80,9 +80,11 @@ The following keys are stored in the `Preferences` namespace (`bridge_cfg`):
 * `ble_pin` (String)
 * `debug_logs` (Bool)
 * `mqtt_enabled` (Bool)
-* `mqtt_insecure` (Bool)
+* `mqtt_tls_insec` (Bool)
 * `mqtt_custom_ca` (String)
 
 ## Technical Decisions & Considerations
+* **Zero-Heap PROGMEM Serving:** The main web UI HTML payload is streamed directly out of flash memory via `AsyncProgmemResponse`, eliminating the ~35 KB temporary heap spike when serving web clients.
+* **Client-Side Polling:** Telemetry endpoints like `/mqtt_status` are polled every 6 seconds to maintain live stats (including published, received, and dropped counts) while minimizing network traffic and CPU load.
 * **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for WiFi and Bluetooth. Using `ESPAsyncWebServer` combined with asynchronous background tasks for BLE operations prevents HTTP request timeouts and prevents radio collisions while switching between WiFi AP and BLE scanning/testing.
 * **NimBLE Stack:** `NimBLE-Arduino` provides low memory footprint BLE client capabilities, essential for coexisting with `ESPAsyncWebServer` and `WiFi` on resource-constrained ESP32-S3 boards without heap exhaustion.
