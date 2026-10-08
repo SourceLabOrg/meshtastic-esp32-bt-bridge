@@ -78,8 +78,8 @@ else:
                 nanopb_generator,
                 f"-I{proto_base_dir}",
                 f"-I{proto_src_dir}",
-                f"-D{out_meshtastic_dir}",
-                "-Q#include \"meshtastic/%s\"",
+                f"-D{out_base_dir}",
+                "-Q#include \"%s\"",
                 "-S.cpp",
                 "-T", # No timestamp to avoid spurious recompilations
                 proto_path
@@ -97,10 +97,11 @@ else:
 # Include directories for headers:
 # 1. out_base_dir so `#include "meshtastic/mesh.pb.h"` works
 # 2. nanopb_lib_dir so `#include <pb.h>` works
-env.Append(CPPPATH=[out_base_dir, nanopb_lib_dir])
-
-# Register generated .c files for compilation
 global_env = DefaultEnvironment()
+env.Append(CPPPATH=[out_base_dir, nanopb_lib_dir])
+global_env.Append(CPPPATH=[out_base_dir, nanopb_lib_dir])
+
+# Register generated .cpp files for compilation
 already_called_env_name = "_MESHTASTIC_PROTO_BUILD_CALLED_" + pioenv.replace("-", "_")
 if not global_env.get(already_called_env_name, False):
     env.BuildSources(os.path.join(build_dir, "nanopb_objs"), out_meshtastic_dir)

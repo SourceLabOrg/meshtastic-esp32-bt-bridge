@@ -121,7 +121,49 @@ To achieve a clean console while preserving our own debug logs, we use the follo
 - **Bluetooth (NimBLE) Logs:** NimBLE is configured via its own flag in `platformio.ini`. We currently set `-D CONFIG_NIMBLE_CPP_LOG_LEVEL=2` (Warning) to keep it quiet. You can increase this to `4` (Debug) if you need to debug raw GATT characteristics.
 
 ---
-## 8. Releasing a New Version
+## 8. TLS Root Certificate Authority (CA) Bundle Pipeline
+
+To support secure MQTTS connections to any public broker (such as `mqtt.meshtastic.org:8883` using Let's Encrypt, or AWS IoT, HiveMQ, EMQX, etc.) without hardcoding static server certificates, the project embeds a compact, pre-compiled Mozilla Root CA bundle.
+
+### How it Works
+1. **Pre-Compiled Bundle (`data/cert/x509_crt_bundle.bin`):** Contains ~130+ standard trusted root CA certificates compressed into a binary format (subject names + public keys only, ~86 KB total).
+2. **PlatformIO Embedding:** Configured in `platformio.ini` via:
+   ```ini
+   board_build.embed_files = data/cert/x509_crt_bundle.bin
+   ```
+   During compilation, the linker exposes the binary start symbol `_binary_data_cert_x509_crt_bundle_bin_start`.
+3. **Runtime Initialization:** On boot, `mqtt_net_init()` invokes:
+   ```cpp
+   extern const uint8_t rootca_crt_bundle_start[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
+   arduino_esp_crt_bundle_set(rootca_crt_bundle_start);
+   ```
+4. **Binary Search Verification:** When a TLS connection is opened, mbedTLS uses binary search against the embedded flash memory to verify server certificate chains with minimal RAM overhead.
+5. **Self-Signed / Insecure Bypass:** When the "Skip Certificate Validation" toggle is enabled in the WebUI, the bridge attaches a custom handler that sets `MBEDTLS_SSL_VERIFY_NONE` and skips hostname verification, allowing local LAN brokers and self-signed certificates.
+
+### Updating the CA Bundle
+Root CA certificates change very infrequently (with 15–30 year validity windows), but the bundle can be refreshed at any time directly from the official Mozilla / cURL certificate store:
+
+```bash
+# 1. Create a temporary Python virtual environment with cryptography
+python3 -m venv /tmp/ca_env
+/tmp/ca_env/bin/pip install cryptography --quiet
+
+# 2. Download Espressif's standalone bundle generator and the latest Mozilla CA store
+curl -s https://raw.githubusercontent.com/espressif/esp-idf/release/v5.1/components/mbedtls/esp_crt_bundle/gen_crt_bundle.py -o /tmp/gen_crt_bundle.py
+curl -s https://curl.se/ca/cacert.pem -o /tmp/cacert.pem
+
+# 3. Generate the compact binary bundle and move to data/cert/
+/tmp/ca_env/bin/python /tmp/gen_crt_bundle.py -i /tmp/cacert.pem
+mv x509_crt_bundle data/cert/x509_crt_bundle.bin
+
+# 4. Clean up temporary files
+rm -rf /tmp/ca_env /tmp/gen_crt_bundle.py /tmp/cacert.pem
+```
+
+*Note: Make sure to commit the updated `data/cert/x509_crt_bundle.bin` to Git so CI/CD and other developers compile with the new certificate store.*
+
+---
+## 9. Releasing a New Version
 
 The project is fully automated using GitHub Actions. To release a new firmware version, you **do not** need to manually compile or upload binaries. 
 

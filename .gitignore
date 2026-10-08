@@ -3,6 +3,7 @@
 .devcontainer/*.log
 *.o
 *.bin
+!data/cert/x509_crt_bundle.bin
 *.elf
 *.map
 

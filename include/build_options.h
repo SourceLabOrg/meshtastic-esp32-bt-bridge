@@ -55,6 +55,11 @@
 #define BLUETOOTH_TIMEOUT_SECONDS 8
 #endif
 
+// Bluetooth Reconnect Delay time, in milliseconds
+#ifndef BLUETOOTH_RECONNECT_DELAY_MS
+#define BLUETOOTH_RECONNECT_DELAY_MS 5000
+#endif
+
 // Bluetooth Scan Timeout in seconds
 #ifndef BLUETOOTH_SCAN_TIME_SECONDS
 #define BLUETOOTH_SCAN_TIME_SECONDS 4
@@ -79,6 +84,34 @@
 // Size of message queues between BLE <--> TCP Connections.
 #ifndef BRIDGE_QUEUE_SIZE
 #define BRIDGE_QUEUE_SIZE 100
+#endif
+
+// -----------------------------------------
+// MQTT Gateway Settings
+// -----------------------------------------
+// Capacity of static MQTT downlink packet buffer queue.
+#ifndef MQTT_QUEUE_SIZE
+#define MQTT_QUEUE_SIZE 40
+#endif
+
+// Duration (in seconds) to keep MQTT broker connected during transient Bluetooth drops.
+#ifndef MQTT_BLE_GRACE_PERIOD_SECONDS
+#define MQTT_BLE_GRACE_PERIOD_SECONDS 60
+#endif
+
+// Underlying MQTT Client Keepalive setting, in seconds.
+#ifndef MQTT_CLIENT_KEEPALIVE_SECONDS
+#define MQTT_CLIENT_KEEPALIVE_SECONDS 60
+#endif
+
+// On disconnect from a broker, after how long will it attempt to reconnect, in milliseconds.
+#ifndef MQTT_RECONNECT_TIME_MS
+#define MQTT_RECONNECT_TIME_MS 7000
+#endif
+
+// Internal MQTT client buffer size
+#ifndef MQTT_CLIENT_BUFFER_SIZE
+#define MQTT_CLIENT_BUFFER_SIZE 2048
 #endif
 
 // -----------------------------------------

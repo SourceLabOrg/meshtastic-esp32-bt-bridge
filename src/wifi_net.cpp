@@ -282,6 +282,14 @@ void wifi_net_start_mdns(const BridgeConfig& cfg) {
 }
 
 /**
+ * @return True if running in Access Point / Captive Portal setup mode.
+ *         False if running in 'normal' bridge mode.
+ */
+bool wifi_net_is_ap_mode() {
+    return isApMode;
+}
+
+/**
  * Handle processing DNS requests if running in AP mode.
  */
 void wifi_net_loop() {

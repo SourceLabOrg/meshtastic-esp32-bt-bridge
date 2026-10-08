@@ -1,6 +1,7 @@
 #include "config_ui.h"
 #include "ble_client.h"
 #include "wifi_net.h"
+#include "mqtt_net.h"
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include "build_options.h"
@@ -66,6 +67,12 @@ const char index_html[] PROGMEM = R"rawliteral(
   .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
   .alert-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
   .alert-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+  .status-pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .status-pill.disabled { background-color: #e4e6eb; color: #65676b; }
+  .status-pill.connected { background-color: #d4edda; color: #155724; }
+  .status-pill.waiting { background-color: #fff3cd; color: #856404; }
+  .status-pill.connecting { background-color: #d1ecf1; color: #0c5460; }
+  .status-pill.error { background-color: #f8d7da; color: #721c24; }
   .footer { text-align: center; font-size: 12px; color: #65676b; margin-top: 24px; padding-bottom: 20px; }
   .footer a { color: #0066cc; text-decoration: none; font-weight: 600; }
   .footer a:hover { text-decoration: underline; }
@@ -155,6 +162,71 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <!-- MQTT Gateway Card -->
+  <div class="card" id="card-mqtt">
+    <div class="card-header">
+      <div class="card-title">🌐 MQTT Gateway</div>
+      <button class="btn-edit" id="btn-edit-mqtt" onclick="toggleEditMqtt(true)">Edit</button>
+    </div>
+    <div id="mqtt-view">
+      <div class="info-row">
+        <span class="info-label">Status:</span>
+        <span class="info-val"><span id="view-mqtt-status-pill" class="status-pill disabled">Disabled</span></span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Radio Proxy:</span>
+        <span class="info-val" id="view-mqtt-radio-proxy">(Unknown)</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Detected Broker:</span>
+        <span class="info-val" id="view-mqtt-broker">(Waiting for radio)</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Root Topic:</span>
+        <span class="info-val" id="view-mqtt-root">msh</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Traffic:</span>
+        <span class="info-val" id="view-mqtt-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+      </div>
+    </div>
+    <div id="mqtt-edit" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+        <label for="input-mqtt-enabled" style="margin:0; font-size:14px; font-weight:600;">Enable MQTT Gateway</label>
+        <input type="checkbox" id="input-mqtt-enabled" style="width:20px; height:20px; margin:0;">
+      </div>
+
+      <div class="alert alert-info" style="display:block; margin-bottom: 12px;">
+        <strong>Auto-Sync Mode:</strong> The bridge automatically connects to the MQTT broker, credentials, and root topic configured on the connected Meshtastic radio.
+      </div>
+
+      <div style="margin: 10px 0 6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+          <label for="input-mqtt-tls-insecure" style="margin:0; font-size:13px;">Skip Certificate Validation</label>
+          <input type="checkbox" id="input-mqtt-tls-insecure" style="width:20px; height:20px; margin:0;">
+        </div>
+        <small style="color:#65676b; display:block; margin-bottom:10px;">Allow connections to local LAN brokers using self-signed certificates or IP addresses.</small>
+      </div>
+
+      <div style="margin: 10px 0;">
+        <label style="margin-bottom:4px;">Custom CA Certificate (Optional PEM):</label>
+        <textarea id="input-mqtt-ca" rows="4" style="width:100%; padding:8px; border:1px solid #ccd0d5; border-radius:6px; font-family:monospace; font-size:11px; resize:vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <input type="file" id="file-mqtt-ca" accept=".pem,.crt,.cer" style="display:none;" onchange="loadCaFile(this)">
+          <button type="button" class="btn-secondary" style="flex:1; padding:6px; font-size:12px; margin:0;" onclick="document.getElementById('file-mqtt-ca').click()">📂 Load Cert File</button>
+          <button type="button" class="btn-secondary" style="flex:1; padding:6px; font-size:12px; margin:0;" onclick="document.getElementById('input-mqtt-ca').value=''">🗑 Clear</button>
+        </div>
+        <small style="color:#65676b; display:block; margin-top:4px;">Leave blank to use built-in Mozilla Root CAs (Let's Encrypt, DigiCert, etc.)</small>
+      </div>
+
+      <div id="mqtt-alert" class="alert"></div>
+      <div class="btn-group">
+        <button class="btn-success" id="btn-save-mqtt" onclick="saveMqtt()">Save MQTT</button>
+        <button class="btn-secondary" onclick="toggleEditMqtt(false)">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- System Actions Card -->
   <div class="card">
     <div class="card-header">
@@ -235,11 +307,99 @@ const char index_html[] PROGMEM = R"rawliteral(
           document.getElementById('input-ble-mac').value = cfg.ble_mac || '';
           document.getElementById('input-ble-pin').value = cfg.ble_pin || '';
           document.getElementById('sys-debug-logs').checked = !!cfg.debug_logs;
+
+          // MQTT fields
+          document.getElementById('input-mqtt-enabled').checked = !!cfg.mqtt_enabled;
+          document.getElementById('input-mqtt-tls-insecure').checked = !!cfg.mqtt_tls_insecure;
+          document.getElementById('input-mqtt-ca').value = cfg.mqtt_custom_ca || '';
+          updateMqttStatus();
         })
         .catch(() => {
           document.getElementById('view-wifi-ssid').innerText = 'Error loading';
           document.getElementById('view-ble-device').innerText = 'Error loading';
         });
+    }
+
+    function toggleEditMqtt(edit) {
+      document.getElementById('mqtt-view').style.display = edit ? 'none' : 'block';
+      document.getElementById('mqtt-edit').style.display = edit ? 'block' : 'none';
+      document.getElementById('btn-edit-mqtt').style.display = edit ? 'none' : 'block';
+      hideAlert('mqtt-alert');
+    }
+
+    function loadCaFile(input) {
+      if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          document.getElementById('input-mqtt-ca').value = e.target.result;
+        };
+        reader.readAsText(input.files[0]);
+      }
+    }
+
+    function saveMqtt() {
+      const enabled = document.getElementById('input-mqtt-enabled').checked;
+      const tls_insecure = document.getElementById('input-mqtt-tls-insecure').checked;
+      const custom_ca = document.getElementById('input-mqtt-ca').value.trim();
+
+      let body = 'mqtt_enabled=' + (enabled ? 'true' : 'false') +
+                 '&mqtt_tls_insecure=' + (tls_insecure ? 'true' : 'false') +
+                 '&mqtt_custom_ca=' + encodeURIComponent(custom_ca);
+
+      const btnSave = document.getElementById('btn-save-mqtt');
+      btnSave.disabled = true;
+
+      fetch('/save_mqtt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      })
+      .then(r => r.json())
+      .then(res => {
+        btnSave.disabled = false;
+        if (res.success) {
+          showAlert('mqtt-alert', 'success', 'MQTT configuration saved!');
+          setTimeout(() => {
+            toggleEditMqtt(false);
+            loadConfig();
+            updateMqttStatus();
+          }, 800);
+        } else {
+          showAlert('mqtt-alert', 'error', res.error || 'Failed to save MQTT.');
+        }
+      })
+      .catch(() => {
+        btnSave.disabled = false;
+        showAlert('mqtt-alert', 'error', 'Network error saving MQTT.');
+      });
+    }
+
+    function updateMqttStatus() {
+      fetch('/mqtt_status')
+        .then(r => r.json())
+        .then(st => {
+          const pill = document.getElementById('view-mqtt-status-pill');
+          if (pill) {
+            pill.innerText = st.state || 'Disabled';
+            if (st.state === 'Connected') pill.className = 'status-pill connected';
+            else if (st.state === 'Waiting for Radio Config') pill.className = 'status-pill waiting';
+            else if (st.state === 'Connecting...') pill.className = 'status-pill connecting';
+            else if (st.state === 'Disabled') pill.className = 'status-pill disabled';
+            else pill.className = 'status-pill error';
+          }
+
+          document.getElementById('view-mqtt-radio-proxy').innerText = st.radio_proxy_enabled ? 'Enabled (Ready)' : (st.radio_server ? 'Disabled on Radio' : '(Waiting for radio)');
+          if (st.active_server) {
+            document.getElementById('view-mqtt-broker').innerText = st.active_server + ':' + st.active_port + (st.active_tls ? ' (TLS)' : '');
+          } else if (st.radio_server) {
+            document.getElementById('view-mqtt-broker').innerText = st.radio_server + ':' + st.radio_port + (st.radio_tls ? ' (TLS)' : '');
+          } else {
+            document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
+          }
+          document.getElementById('view-mqtt-root').innerText = st.active_root || st.radio_root || 'msh';
+          document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (st.published || 0) + ' sent / ▼ ' + (st.received || 0) + ' rcvd';
+        })
+        .catch(() => {});
     }
 
     function toggleEditWifi(edit) {
@@ -658,6 +818,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     window.onload = function() {
       document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
       loadConfig();
+      setInterval(updateMqttStatus, 3000);
     };
   </script>
 </body>
@@ -676,12 +837,23 @@ void config_ui_init() {
  */
 BridgeConfig config_ui_load() {
     BridgeConfig cfg;
+
+    // Wifi settings
     cfg.wifi_ssid = preferences.getString("wifi_ssid", "");
     cfg.wifi_pass = preferences.getString("wifi_pass", "");
+
+    // Bluetooth settings
     cfg.ble_name = preferences.getString("ble_name", "");
     cfg.ble_mac = preferences.getString("ble_mac", "");
     cfg.ble_pin = preferences.getString("ble_pin", "");
+
+    // System settings
     cfg.debug_logs = preferences.getBool("debug_logs", false);
+
+    // MQTT preferences
+    cfg.mqtt_enabled = preferences.getBool("mqtt_enabled", false);
+    cfg.mqtt_tls_insecure = preferences.getBool("mqtt_tls_insec", false);
+    cfg.mqtt_custom_ca = preferences.getString("mqtt_custom_ca", "");
     return cfg;
 }
 
@@ -703,9 +875,43 @@ void config_ui_start_server() {
         json += "\"ble_name\":\"" + utils_escape_json(cfg.ble_name) + "\",";
         json += "\"ble_mac\":\"" + utils_escape_json(cfg.ble_mac) + "\",";
         json += "\"ble_pin\":\"" + utils_escape_json(cfg.ble_pin) + "\",";
-        json += "\"debug_logs\":" + String(cfg.debug_logs ? "true" : "false");
+        json += "\"debug_logs\":" + String(cfg.debug_logs ? "true" : "false") + ",";
+        json += "\"mqtt_enabled\":" + String(cfg.mqtt_enabled ? "true" : "false") + ",";
+        json += "\"mqtt_tls_insecure\":" + String(cfg.mqtt_tls_insecure ? "true" : "false") + ",";
+        json += "\"mqtt_custom_ca\":\"" + utils_escape_json(cfg.mqtt_custom_ca) + "\"";
         json += "}";
         request->send(200, "application/json", json);
+    });
+
+    // Fetch MQTT live status
+    server.on("/mqtt_status", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "application/json", mqtt_net_get_status_json());
+    });
+
+    // Save MQTT configuration
+    server.on("/save_mqtt", HTTP_POST, [](AsyncWebServerRequest *request){
+        bool enabled = request->hasParam("mqtt_enabled", true) && (request->getParam("mqtt_enabled", true)->value() == "true");
+        bool tlsInsecureVal = request->hasParam("mqtt_tls_insecure", true) && (request->getParam("mqtt_tls_insecure", true)->value() == "true");
+        String customCaVal = request->hasParam("mqtt_custom_ca", true) ? request->getParam("mqtt_custom_ca", true)->value() : "";
+
+        preferences.putBool("mqtt_enabled", enabled);
+        preferences.putBool("mqtt_tls_insec", tlsInsecureVal);
+        preferences.putString("mqtt_custom_ca", customCaVal);
+
+        // Apply updated MQTT config immediately to the runtime subsystem
+        BridgeConfig fullCfg = config_ui_load();
+        MqttConfig mcfg;
+        mcfg.enabled = fullCfg.mqtt_enabled;
+        mcfg.tls_insecure = fullCfg.mqtt_tls_insecure;
+        mcfg.custom_ca = fullCfg.mqtt_custom_ca;
+
+        // Only apply live configuration to the runtime subsystem if operating in Normal mode.
+        // In AP / Setup mode, settings are safely stored in NVS and applied on normal boot.
+        if (!wifi_net_is_ap_mode()) {
+            mqtt_net_apply_config(mcfg);
+        }
+
+        request->send(200, "application/json", "{\"success\":true}");
     });
 
     // Trigger the WiFi scan asynchronously

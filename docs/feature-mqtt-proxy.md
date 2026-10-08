@@ -6,9 +6,11 @@ This document details the architectural plan, feasibility analysis, protocol det
 
 ### Goals
 * **Completely Optional:** The feature is disabled by default. If disabled, existing TCP bridging operation is 100% unaffected.
-* **Dual Configuration Modes (Auto-Sync vs. Manual):**
-  * **Auto-Sync from Radio (Zero-Config):** Automatically inherits broker address, credentials, encryption (TLS), and root topic directly from the connected Meshtastic radio's `ModuleConfig.mqtt` payload.
-  * **Manual / Custom Override:** Allows entering custom broker settings via the WebUI (ideal for routing through a local Home Assistant / Mosquitto broker on the LAN without reconfiguring the radio).
+* **Auto-Sync from Radio (Zero-Config):** Automatically inherits broker address, port, credentials, encryption (TLS), and root topic directly from the connected Meshtastic radio's `ModuleConfig.mqtt` payload. Eliminates configuration duplication and prevents topic mismatch bugs.
+* **3-Tier TLS Security Architecture:**
+  * **Tier 1 (Public CA):** Built-in Mozilla Root CA bundle for zero-config public brokers (`mqtt.meshtastic.org`, AWS IoT, HiveMQ, etc.).
+  * **Tier 2 (Custom / Private CA):** Upload / paste custom CA root certificates in PEM format for private/enterprise brokers.
+  * **Tier 3 (Insecure Bypass):** Toggle to skip certificate and hostname validation for quick LAN/self-signed testing.
 * **Autonomous 24/7 Gateway:** When enabled, the ESP32 acts as an autonomous MQTT client proxy for the connected Meshtastic radio (which has `module_config.mqtt.proxy_to_client_enabled = true`), eliminating the need to keep a mobile phone or desktop computer running continuously.
 * **Safe Coexistence with TCP Clients:** Simultaneous TCP clients (such as the Meshtastic Web UI, desktop apps, or mobile apps connecting via WiFi) can coexist with the bridge without corrupting the BLE link or causing duplicate MQTT publishes.
 
@@ -21,7 +23,7 @@ This document details the architectural plan, feasibility analysis, protocol det
 * **CPU:** The ESP32 / ESP32-S3 dual-core Xtensa CPU (240 MHz) provides ample compute:
   * Core 0 handles WiFi networking (AsyncTCP, AsyncWebServer, and the MQTT client).
   * Core 1 handles the NimBLE stack and BLE polling.
-* **Flash Space:** Our `huge_app.csv` partition table allocates ~3.1 MB for firmware. The current binary is ~1.2 MB, providing ~1.9 MB of headroom for MQTT and Protobuf libraries.
+* **Flash Space:** Our `huge_app.csv` partition table allocates ~3.1 MB for firmware. The current binary is ~1.3 MB (including embedded root CA bundle), providing ~1.8 MB of headroom.
 
 ### 2.2 Performance & CPU Impact
 * **Negligible CPU Overhead (< 1-2%):** Meshtastic is designed for low-bandwidth LoRa links (typically 0.1 to 5 packets/second). An MQTT client processing a handful of small JSON/Protobuf packets per minute places virtually zero strain on the CPU.
@@ -35,40 +37,25 @@ This document details the architectural plan, feasibility analysis, protocol det
 
 ---
 
-## 3. Configuration Sources: Auto-Sync vs. Manual Override
+## 3. Configuration Architecture: Radio Auto-Sync
 
-### 3.1 How the Radio Stores and Provides MQTT Settings
+### 3.1 Why Auto-Sync is the Native Architecture
+In the Meshtastic ecosystem, the **physical radio** is the authoritative source of truth for MQTT topics, encryption keys, and channel hashes. When the radio formats a `MqttClientProxyMessage`, the topic string (e.g. `msh/US/2/e/...` or `ptp/commons/...`) is constructed internally based on its own `ModuleConfig.mqtt.root` configuration.
+
+By using Auto-Sync:
+1. **Zero Configuration Drift:** The user configures MQTT once inside the standard Meshtastic App / CLI. The bridge automatically adapts.
+2. **No Topic Rewriting Complexity:** Avoids error-prone dynamic prefix rewriting across complex mesh channels.
+3. **Identical to Official Mobile Apps:** The bridge operates identically to the official Android/iOS apps when proxying.
+
+### 3.2 Radio MQTT Settings
 When a user configures MQTT via the official Meshtastic mobile or desktop apps, the settings are stored on the radio inside `ModuleConfig.mqtt`:
 * **`address`**: Hostname or IP of the broker (e.g. `mqtt.meshtastic.org`).
 * **`username`** & **`password`**: Broker credentials.
 * **`encryption_enabled`** (`bool`): Whether TLS/SSL (port 8883) is required.
-* **`root`**: Root topic prefix (e.g. `msh` or `msh/US`).
+* **`root`**: Root topic prefix (e.g. `msh` or custom).
 * **`proxy_to_client_enabled`** (`bool`): Tells the radio to offload MQTT to the connected client.
 
-During the initial BLE connection sync, the radio transmits its configuration to the bridge.
-
-### 3.2 Operating Modes
-
-```text
-                             ┌──────────────────────────────┐
-                             │     MQTT Gateway Feature     │
-                             │          (Enabled)           │
-                             └──────────────┬───────────────┘
-                                            │
-                    ┌───────────────────────┴───────────────────────┐
-                    ▼                                               ▼
-     ┌─────────────────────────────┐                 ┌─────────────────────────────┐
-     │      Auto-Sync Mode         │                 │    Manual Override Mode     │
-     │      (Zero-Config)          │                 │       (Custom Broker)       │
-     ├─────────────────────────────┤                 ├─────────────────────────────┤
-     │ • Reads ModuleConfig.mqtt   │                 │ • Uses settings saved in    │
-     │   directly from the radio   │                 │   Bridge WebUI Preferences  │
-     │ • Inherits Host, User, Pass,│                 │ • Independent of radio's    │
-     │   TLS, and Root Topic       │                 │   internal broker config    │
-     │ • Auto-updates if radio     │                 │ • Great for private local   │
-     │   config changes            │                 │   Mosquitto / Home Assist.  │
-     └─────────────────────────────┘                 └─────────────────────────────┘
-```
+During the initial BLE connection sync, the radio transmits its configuration to the bridge via `FromRadio.config` / `FromRadio.moduleConfig`.
 
 ---
 
@@ -118,14 +105,95 @@ During the initial BLE connection sync, the radio transmits its configuration to
 #### Potential Conflicts and Resolutions:
 1. **Normal TCP Client (Web UI / Phone App / Meshtastic CLI) + Bridge MQTT:**
    * **Behavior:** The TCP client sends commands and receives standard mesh packets (text messages, node DB, telemetry).
-   * **BLE Arbitration:** Both TCP and MQTT transmit to the radio via a shared FreeRTOS queue (`to_ble_queue`), ensuring thread-safe, sequential writes to the `ToRadio` BLE characteristic.
+   * **BLE Arbitration:** Both TCP and MQTT transmit to the radio via a shared FreeRTOS queue (`tcp_to_ble_queue`), ensuring thread-safe, sequential writes to the `ToRadio` BLE characteristic.
    * **Result:** Seamless coexistence.
 
 2. **External TCP Client ALSO running an MQTT Proxy (e.g., MeshMonitor with proxy enabled):**
    * **Risk:** If both the ESP32 Bridge and MeshMonitor connect to the broker and publish the same `FromRadio.mqttClientProxyMessage`, duplicate messages will hit the MQTT server.
    * **Resolution:**
      * **Packet Filtering:** When the ESP32 Bridge's MQTT client is enabled, the bridge intercepts and consumes `FromRadio.mqttClientProxyMessage` packets so they are published to MQTT directly and *not* duplicated onto the TCP client stream.
-     * **UI / User Guidance:** The WebUI and documentation will instruct users to disable the proxy toggle in upstream TCP clients (like MeshMonitor) when the bridge's native MQTT feature is enabled.
+     * **UI / User Guidance:** The WebUI and documentation instruct users to disable the proxy toggle in upstream TCP clients (like MeshMonitor) when the bridge's native MQTT feature is enabled.
+
+### 4.4 Connection Lifecycle & Failure Recovery Model
+
+```mermaid
+flowchart TD
+    A[ESP32 Normal Boot] --> B[Connect to WiFi Station]
+    B --> C{Bluetooth Connected?}
+    C -- No --> D[Set State: Waiting for Radio<br>Broker Connection Deferred]
+    C -- Yes --> E[Wait for FromRadio.moduleConfig.mqtt]
+    D -->|BLE Connects & Subscribes| E
+    E -->|Config Received + proxy_to_client_enabled=true| F[Connect to Synced Broker]
+    F --> G[MQTT Active & Subscribed]
+    G --> H{Bluetooth Drops?}
+### 4.4 Dual-Queue Architecture & Command Prioritization
+
+To prevent high-volume MQTT mesh traffic from blocking interactive phone app commands (such as changing channel settings or sending direct messages), the bridge maintains two separate, statically allocated FreeRTOS queues:
+
+```text
+┌─────────────────────────┐
+│ TCP Client (Phone App)  │ ──► [ tcp_to_ble_queue (Size: 100) ] ──┐ (Priority 1: High)
+└─────────────────────────┘                                        │
+                                                                   ▼
+                                                           ┌────────────────┐
+                                                           │  bridgeBleTask │ ──► BLE ToRadio
+                                                           └────────────────┘
+                                                                   ▲
+┌─────────────────────────┐                                        │
+│ MQTT Broker Downlink    │ ──► [ mqtt_to_ble_queue (Size: 40) ] ──┘ (Priority 2: Normal)
+└─────────────────────────┘
+```
+
+1. **`tcp_to_ble_queue` (High Priority):** Carries locally generated phone app commands and chat packets. `bridgeBleTask` always checks and drains this queue first.
+2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty.
+3. **Static Allocation (.bss segment):** Both queues are statically reserved (`MQTT_QUEUE_SIZE = 40`), consuming ~20.6 KB of `.bss` memory with **zero heap fragmentation risk**.
+
+### 4.5 Connection Lifecycle & Disconnect Grace Period Model
+
+```mermaid
+flowchart TD
+    A[ESP32 Normal Boot] --> B[Connect to WiFi Station]
+    B --> C{Bluetooth Connected?}
+    C -- No --> D[Set State: Waiting for Radio<br>Broker Connection Deferred]
+    C -- Yes --> E[Wait for FromRadio.moduleConfig.mqtt]
+    D -->|BLE Connects & Subscribes| E
+    E -->|Config Received + proxy_to_client_enabled=true| F[Connect to Synced Broker]
+    F --> G[MQTT Active & Subscribed]
+    G --> H{Bluetooth Drops?}
+    H -- No --> G
+    H -- Yes --> I[Start 60s Grace Timer<br>Buffer Downlink in mqtt_to_ble_queue]
+    I --> J{Queue > 40 Packets?}
+    J -- Yes --> K[Drop Extra Packets + Log Warning]
+    J -- No --> L[Retain Buffered Packets]
+    K --> M{Timer > 60s?}
+    L --> M
+    M -- Yes --> N[Stop MQTT Client<br>Clear mqtt_to_ble_queue<br>State: Waiting for Radio]
+    N --> C
+    M -- No --> O{Bluetooth Reconnects?}
+    O -- No --> I
+    O -- Yes --> P{Broker Config Identical?}
+    P -- Yes --> Q[Resume Draining Queue to Radio<br>Preserve Active Broker Session]
+    Q --> G
+    P -- No --> R[Disconnect Old Broker<br>Clear mqtt_to_ble_queue<br>Connect to New Broker]
+    R --> G
+```
+
+#### Detailed Lifecycle & State Transition Rules:
+1. **Bluetooth-Gated Broker Startup:**
+   * On initial boot, the bridge waits for the Bluetooth link to establish and for `FromRadio.moduleConfig.mqtt` to arrive (`bridge_is_ble_connected() == true`).
+   * The MQTT client starts only if `proxy_to_client_enabled == true` on the radio.
+2. **Bluetooth Disconnect Grace Period (Default: 60 Seconds):**
+   * If Bluetooth drops, the bridge starts a 60-second grace timer (`MQTT_BLE_GRACE_PERIOD_SECONDS`).
+   * The MQTT broker TCP/TLS socket **remains open**, allowing up to 40 incoming downlink packets to buffer in `mqtt_to_ble_queue`.
+   * **Queue Saturation:** If 40 packets accumulate before BLE reconnects, subsequent packets are dropped with a warning log.
+3. **Grace Timer Expiry (> 60 Seconds):**
+   * If BLE remains disconnected past 60 seconds, the MQTT client is stopped (`mqtt_net_stop_client()`), `mqtt_to_ble_queue` is cleared via `xQueueReset()`, and state switches to `MQTT_STATE_WAITING_RADIO_CONFIG`.
+4. **Fast Reconnect & Config Change Detection:**
+   * If BLE reconnects within 60 seconds:
+     * **Identical Configuration:** The bridge compares the incoming radio settings with the active session struct. If identical, the existing MQTT session is kept and `bridgeBleTask` immediately resumes draining `mqtt_to_ble_queue` to the radio.
+     * **Changed Configuration (e.g. Swapped Radio):** The old MQTT client is stopped, `mqtt_to_ble_queue` is cleared, and a new client is spawned for the new broker.
+5. **AP / Setup Mode Isolation:**
+   * In AP / Setup mode (`wifi_net_is_ap_mode() == true`), settings are saved strictly to NVS without spawning background network clients.
 
 ---
 
@@ -135,36 +203,31 @@ During the initial BLE connection sync, the radio transmits its configuration to
 
 | Key | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `mqtt_enabled` | bool | `false` | Master toggle to enable/disable MQTT gateway |
-| `mqtt_mode` | string | `"auto"` | Mode: `"auto"` (sync from radio) or `"manual"` (custom settings) |
-| `mqtt_server` | string | `""` | Broker hostname or IP (manual mode) |
-| `mqtt_port` | uint16 | `1883` | Broker port (`1883` for plaintext, `8883` for TLS) (manual mode) |
-| `mqtt_user` | string | `""` | Broker username (manual mode) |
-| `mqtt_pass` | string | `""` | Broker password (manual mode) |
-| `mqtt_root` | string | `"msh"` | Meshtastic root topic prefix (manual mode) |
-| `mqtt_sub` | string | `""` | Custom subscribe topic filter (optional; defaults to `<root>/#`) |
-| `mqtt_tls` | bool | `false` | Enable TLS/SSL encrypted connection (manual mode) |
-| `mqtt_cid` | string | `""` | Custom MQTT Client ID (optional; defaults to auto-generated ID) |
+| `mqtt_enabled` | bool | `false` | Master toggle to enable/disable MQTT gateway on the bridge |
+| `mqtt_tls_insec` | bool | `false` | Skip certificate & hostname validation (for local self-signed brokers) |
+| `mqtt_custom_ca` | string | `""` | Optional PEM-encoded Root CA / Server Certificate for private brokers |
 
-### 5.2 WebUI Design & Components
-A dedicated **MQTT Gateway (Optional)** card added to the captive portal:
-* **Toggle Switch:** "Enable MQTT Gateway" (can be toggled on/off at any time without losing credentials).
-* **Mode Selector:** Radio buttons or Segmented Switch:
-  * 🔘 **Auto (Sync from Radio):** Displays live status of settings extracted from the connected radio:
-    * *Detected Broker:* `mqtt.meshtastic.org:8883 (TLS)`
-    * *Username:* `meshdev`
-    * *Root Topic:* `msh/US`
-  * 🔘 **Manual Override:** Reveals editable form inputs:
-    * Broker Hostname / IP
-    * Broker Port (with helper 1883/8883)
-    * TLS / Encryption toggle
-    * Username & Password (with show/hide toggle)
-    * Root Topic & Custom Subscribe Topic
-    * Client ID (optional)
+### 5.2 Compile-Time Build Options (`build_options.h`)
+
+| Build Flag | Default | Description |
+| :--- | :--- | :--- |
+| `MQTT_QUEUE_SIZE` | `40` | Statically allocated packet buffer capacity for MQTT downlink messages |
+| `MQTT_BLE_GRACE_PERIOD_SECONDS` | `60` | Duration to keep MQTT broker alive during transient Bluetooth disconnects |
+
+### 5.3 WebUI Design & Components
+A dedicated **MQTT Gateway (Auto-Sync from Radio)** card added to the captive portal:
+* **Toggle Switch:** "Enable MQTT Gateway" (master toggle).
+* **Live Radio Sync Information Panel:**
+  * *Radio Proxy Enabled:* `Yes` / `No`
+  * *Detected Broker:* `mqtt.meshtastic.org:8883 (TLS)`
+  * *Username:* `meshdev`
+  * *Root Topic:* `msh/US`
+* **TLS & Security Overrides (Bridge-Specific):**
+  * *Skip Certificate Validation Checkbox:* Bypasses trust chain check for self-signed or local IP brokers.
+  * *Custom CA Certificate (PEM Text Area):* Allows uploading / pasting custom root CA public certificates for secure private TLS.
 * **Connection Status Pill:** Live indicator showing `Disabled`, `Waiting for Radio Config...`, `Connecting...`, `Connected (Broker: ...)` or `Connection Failed`.
 * **Actions:**
   * "Save MQTT Configuration"
-  * "Test MQTT Connection"
 
 ---
 
@@ -261,8 +324,15 @@ Rather than copying external source files into `src/` or depending on downstream
   git commit -m "Upgrade Meshtastic protobufs to v2.8.x"
   ```
 
-### 7.4 Build-Time Dynamic Code Generation
-PlatformIO dynamically generates the required Nanopb headers using a pre-build script (`extra_scripts = pre:generate_protos.py`). Generated C/H files are placed directly into the ephemeral `.pio/build/` directory and added to the compiler search path.
+### 7.5 TLS Architecture & Root CA Bundle Pipeline
+To support verified TLS connections to public MQTT brokers (such as `mqtt.meshtastic.org:8883` backed by Let's Encrypt, or AWS IoT, HiveMQ, EMQX) without hardcoding single static certificates, the build pipeline embeds the standard Mozilla Root CA bundle:
+
+1. **Embedded Bundle (`data/cert/x509_crt_bundle.bin`):** Pre-compiled binary representation containing ~130+ public root CAs (~86 KB).
+2. **Linker Integration:** Configured in `platformio.ini` via `board_build.embed_files = data/cert/x509_crt_bundle.bin`. The start symbol `_binary_data_cert_x509_crt_bundle_bin_start` is linked directly into flash.
+3. **Runtime Registration:** `mqtt_net_init()` registers the bundle in flash via `arduino_esp_crt_bundle_set(rootca_crt_bundle_start)`.
+4. **Dual Verification Pipeline:**
+   * **Standard TLS (`tls_insecure = false`):** `mqtt_cfg.crt_bundle_attach = arduino_esp_crt_bundle_attach;` attaches the bundle for binary-search verification during the TLS handshake.
+   * **Insecure / Self-Signed TLS (`tls_insecure = true`):** Attaches a custom callback executing `mbedtls_ssl_conf_authmode(ssl_conf, MBEDTLS_SSL_VERIFY_NONE)` and sets `skip_cert_common_name_check = true` to bypass verification for local/private brokers with self-signed certificates.
 
 ---
 
@@ -280,29 +350,35 @@ PlatformIO dynamically generates the required Nanopb headers using a pre-build s
 - [x] Add `nanopb/Nanopb @ ^0.4.7` to `platformio.ini`.
 - [x] Add `meshtastic/protobufs` Git submodule pinned to `v2.7.26` in `proto/meshtastic`.
 - [x] Implement `generate_protos.py` PlatformIO pre-script to compile needed protos dynamically into build directory.
+- [x] Embed standard Mozilla Root CA bundle (`data/cert/x509_crt_bundle.bin`) via `board_build.embed_files`.
 - [x] Verify clean build on `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1`.
 
-### Phase 3: MQTT Client Subsystem (`mqtt_net`) 🔲
-- [ ] Create `include/mqtt_net.h` and `src/mqtt_net.cpp`.
-- [ ] Implement broker connection, reconnection backoff, keep-alive loop, and TLS support using ESP-IDF `mqtt_client`.
-- [ ] Implement topic subscription matching (`<root>/#` or custom channels).
-- [ ] Implement message publishing from `MqttClientProxyMessage` payloads.
-- [ ] Implement radio `MQTTConfig` parser for Auto-Sync mode.
+### Phase 3: MQTT Client Subsystem (`mqtt_net`) ✅
+- [x] Create `include/mqtt_net.h` and `src/mqtt_net.cpp`.
+- [x] Implement broker connection, reconnection backoff, keep-alive loop, and TLS support using ESP-IDF `mqtt_client`.
+- [x] Implement Mozilla Root CA bundle verification and self-signed `MBEDTLS_SSL_VERIFY_NONE` insecure bypass.
+- [x] Implement topic subscription matching (`<root>/#` or custom channels).
+- [x] Implement message publishing from `MqttClientProxyMessage` payloads.
+- [x] Implement radio `MQTTConfig` parser for Auto-Sync mode.
+- [x] Implement self-locking recursive mutex thread synchronization (`MqttLockGuard`).
 
-### Phase 4: WebUI & Storage Integration 🔲
-- [ ] Add MQTT preferences keys to `include/config_ui.h` and `src/config_ui.cpp`.
-- [ ] Add the "MQTT Gateway" UI card with mode toggle (Auto-Sync vs. Manual), inputs, and live radio status.
-- [ ] Implement REST endpoints `/save_mqtt` and `/mqtt_status`.
-- [ ] Add client-side validation and live status polling in WebUI.
+### Phase 4: WebUI & Storage Integration ✅
+- [x] Add MQTT preferences keys to `include/config_ui.h` and `src/config_ui.cpp`.
+- [x] Add the "MQTT Gateway" UI card with mode toggle (Auto-Sync vs. Manual), inputs, and live radio status.
+- [x] Implement REST endpoints `/save_mqtt` and `/mqtt_status`.
+- [x] Add client-side validation and live status polling in WebUI.
+- [x] Ensure AP/Setup mode only persists settings to NVS without launching runtime client until Normal boot.
 
-### Phase 5: Bridge Pipeline Multiplexing 🔲
-- [ ] Update `bridge.cpp` to inspect incoming `FromRadio` packets for field 14 (`MqttClientProxyMessage`) and config packets.
-- [ ] Route `MqttClientProxyMessage` packets to `mqtt_net` for publishing.
-- [ ] Route downlink MQTT packets from `mqtt_net` into `to_ble_queue`.
-- [ ] Add packet filtering to prevent echoing proxy packets to TCP clients.
+### Phase 5: Bridge Pipeline Multiplexing ✅
+- [x] Update `bridge.cpp` to inspect incoming `FromRadio` packets for field 14 (`MqttClientProxyMessage`) and config packets.
+- [x] Route `MqttClientProxyMessage` packets to `mqtt_net` for publishing.
+- [x] Route downlink MQTT packets from `mqtt_net` into `tcp_to_ble_queue`.
+- [x] Add packet filtering to prevent echoing proxy packets to TCP clients.
+- [x] Gate initial MQTT broker connection on active Bluetooth connection (`bridge_is_ble_connected()`), while preserving MQTT broker connectivity across transient BLE drops.
 
 ### Phase 6: Verification & Testing 🔲
-- [ ] Test Auto-Sync mode with a radio configured for `mqtt.meshtastic.org`.
-- [ ] Test Manual Override mode with local Mosquitto broker (port 1883) and TLS broker (port 8883).
-- [ ] Test simultaneous TCP client connection (Meshtastic Web UI) during active MQTT proxying.
-- [ ] Test edge cases: broker outage recovery, BLE disconnect/reconnect, WiFi drop/reconnect.
+- [x] Multi-target compiler verification across `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1`.
+- [ ] Hardware test: Auto-Sync mode with radio configured for `mqtt.meshtastic.org`.
+- [ ] Hardware test: Manual Override mode with local broker (port 1883) and TLS broker (port 8883).
+- [ ] Hardware test: Simultaneous TCP client connection (Meshtastic Web UI) during active MQTT proxying.
+- [ ] Hardware test: Edge cases (broker outage recovery, BLE disconnect/reconnect, WiFi drop/reconnect).

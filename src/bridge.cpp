@@ -2,20 +2,26 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <NimBLEDevice.h>
-#include "config_ui.h" // for bridge config if needed
 #include "status_led.h"
 #include "build_options.h"
 #include "utils.h"
+#include "mqtt_net.h"
 #include <atomic>
-
-// Queues for inter-task communication
-static QueueHandle_t tcp_to_ble_queue = NULL;
-static QueueHandle_t ble_to_tcp_queue = NULL;
 
 struct BridgePacket {
     uint8_t data[512]; // Max Meshtastic protobuf size
     size_t len;
 };
+
+// Queues for inter-task communication
+static QueueHandle_t tcp_to_ble_queue = NULL;
+static QueueHandle_t ble_to_tcp_queue = NULL;
+
+// Statically allocated MQTT downlink queue (.bss segment)
+// TODO migrate the other 2 queues to .bss static memory
+static StaticQueue_t mqtt_to_ble_queue_struct;
+static uint8_t mqtt_to_ble_queue_storage[MQTT_QUEUE_SIZE * sizeof(BridgePacket)];
+static QueueHandle_t mqtt_to_ble_queue = NULL;
 
 struct ClientContext {
     AsyncClient* client;
@@ -148,15 +154,34 @@ static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, 
     pendingRadioRead = true;
 }
 
+/**
+ * Fast reactive push when BLE notifications work normally.
+ * Unfortunately we've found that often times this call back doesn't fire
+ * reliably. So we fall back to polling via the bridgeBleTask() method.
+ */
 static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-    // If no TCP clients are connected, then just ignore the data.
-    if (connectedClientsCount.load() == 0) {
+    if (length == 0) {
         return;
     }
     log_d("[Bridge-BLE] notifyFromRadio triggered with %zu bytes!", length);
 
-    // If the device notifies FromRadio directly
-    if (length > 0) {
+    /*
+     * Pass the raw packet to the MQTT subsystem to determine if its relevant to it or not.
+     * This is used to:
+     *   - Discover and auto-syncs ModuleConfig.mqtt settings from the radio.
+     *   - Publishes MqttClientProxyMessage uplink packets to the active MQTT broker.
+     *
+     *  Returns true if it consumed it, and doesn't need further processing here.
+     *  Returns false if it needs to be processed here further.
+     */
+    bool consumedByMqtt = mqtt_net_handle_from_radio(pData, length);
+
+    /*
+     * Only forward the packet to the TCP queue if:
+     *  - It was NOT an internal MQTT proxy message (prevents echoing raw MQTT packets to apps over the tcp socket).
+     *  - There is at least one active TCP client connected (prevents filling the queue).
+     */
+    if (!consumedByMqtt && connectedClientsCount.load() > 0) {
         BridgePacket packet;
         packet.len = length;
         if (length <= sizeof(packet.data)) {
@@ -170,7 +195,7 @@ static void notifyFromRadio(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     }
 }
 
-// Custom BLE Client Callbacks to handle PIN authentication
+// Custom BLE Client Callbacks to handle PIN authentication and disconnects
 class BridgeRuntimeClientCallbacks : public NimBLEClientCallbacks {
 public:
     uint32_t onPassKeyRequest() override {
@@ -189,6 +214,11 @@ public:
             desc->sec_state.encrypted,
             desc->sec_state.authenticated
         );
+    }
+
+    void onDisconnect(NimBLEClient* pClient) override {
+        log_w("[Bridge-BLE] BLE client disconnected.");
+        mqtt_net_on_ble_disconnected();
     }
 };
 
@@ -250,21 +280,32 @@ static void bridgeBleTask(void* parameter) {
                     }
                     log_i("[Bridge-BLE] BLE setup complete. Bridging active.");
                     status_led_set(LED_SOLID_ON);
+                    mqtt_net_on_ble_connected();
                 } else {
-                    log_i("[Bridge-BLE] Meshtastic service not found!");
+                    log_w("[Bridge-BLE] Meshtastic service not found!");
                     bleClient->disconnect();
                 }
             } else {
-                log_i("[Bridge-BLE] Connection failed, retrying in 5s...");
-                delay(5000);
+                log_w("[Bridge-BLE] Connection failed, retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
+                delay(BLUETOOTH_RECONNECT_DELAY_MS);
             }
         } else {
             BridgePacket packet;
             // If we have a pending read, do not sleep at all (0 ticks).
             // Otherwise, wait up to 10ms for incoming TCP packets to keep the loop fast.
             TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
+            bool hasPacket = false;
 
+            // High Priority: App / TCP commands and direct chat messages are checked first.
             if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
+                hasPacket = true;
+            }
+            // Normal Priority: Background MQTT downlink packets are checked
+            else if (xQueueReceive(mqtt_to_ble_queue, &packet, 0) == pdTRUE) {
+                hasPacket = true;
+            }
+
+            if (hasPacket) {
                 log_d("[Bridge-BLE] Writing %zu bytes to ToRadio...", packet.len);
                 if (toRadioChar && toRadioChar->canWrite()) {
                     // Meshtastic ToRadio expects Write Without Response (false)
@@ -274,7 +315,14 @@ static void bridgeBleTask(void* parameter) {
             }
 
             static unsigned long lastFailsafe = 0;
-            if (fromRadioChar && connectedClientsCount.load() > 0) {
+            /**
+             * If we have no connected clients, and aren't running a mqtt broker proxy,
+             * then we can skip processing messages from the connected bluetooth device.
+             *
+             * If we have a connected client, we should push messages as they come in to them.
+             * If we are running a mqtt broker proxy, we need to process messages for it.
+             */
+            if (fromRadioChar && (connectedClientsCount.load() > 0 || mqtt_net_is_enabled())) {
                 // Read if notified, or if it's been 250ms since last check (failsafe)
                 bool doRead = pendingRadioRead || (millis() - lastFailsafe > 250);
 
@@ -295,16 +343,34 @@ static void bridgeBleTask(void* parameter) {
 
                         log_d("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!", currentVal.length());
 
-                        BridgePacket rx_packet;
-                        rx_packet.len = currentVal.length();
-                        if (rx_packet.len <= sizeof(rx_packet.data)) {
-                            memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
-                            // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
-                            if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
-                                log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
+                        /*
+                         * Pass the raw packet to the MQTT subsystem to determine if its relevant to it or not.
+                         * This is used to:
+                         *   - Discover and auto-syncs ModuleConfig.mqtt settings from the radio.
+                         *   - Publishes MqttClientProxyMessage uplink packets to the active MQTT broker.
+                         *
+                         *  Returns true if it consumed it, and doesn't need further processing here.
+                         *  Returns false if it needs to be processed here further.
+                         */
+                        bool consumedByMqtt = mqtt_net_handle_from_radio((const uint8_t*)currentVal.data(), currentVal.length());
+
+                        /*
+                         * Only forward the packet to the TCP queue if:
+                         *  - It was NOT an internal MQTT proxy message (prevents echoing raw MQTT packets to apps over the tcp socket).
+                         *  - There is at least one active TCP client connected (prevents filling the queue).
+                         */
+                        if (!consumedByMqtt && connectedClientsCount.load() > 0) {
+                            BridgePacket rx_packet;
+                            rx_packet.len = currentVal.length();
+                            if (rx_packet.len <= sizeof(rx_packet.data)) {
+                                memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
+                                // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
+                                if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
+                                    log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
+                                }
+                            } else {
+                                log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
                             }
-                        } else {
-                            log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
                         }
 
                         // We successfully pulled a NEW packet! There might be more packets
@@ -363,6 +429,38 @@ static void bridgeNetTask(void* parameter) {
 }
 
 /**
+ * Enqueue an MQTT downlink packet to be transmitted to the BLE radio.
+ *
+ * When a MQTT message comes from the Broker, we queue it up to be sent
+ * to the BLE radio.
+ *
+ * @return bool true on successful queueing, false if unable to queue.
+ */
+bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
+    if (!mqtt_to_ble_queue || !data || len == 0 || len > sizeof(BridgePacket::data)) {
+        return false;
+    }
+    BridgePacket packet;
+    packet.len = len;
+    memcpy(packet.data, data, len);
+    if (xQueueSend(mqtt_to_ble_queue, &packet, 0) != pdTRUE) {
+        log_w("[Bridge-MQTT] WARNING: mqtt_to_ble_queue full (%d packets), dropped downlink packet", MQTT_QUEUE_SIZE);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Clear all pending packets in the MQTT downlink queue.
+ */
+void bridge_clear_mqtt_to_ble_queue() {
+    if (mqtt_to_ble_queue) {
+        xQueueReset(mqtt_to_ble_queue);
+        log_i("[Bridge-MQTT] Cleared mqtt_to_ble_queue.");
+    }
+}
+
+/**
  * Initialize Bridge.
  * @param ble_mac MAC address of BLE device to connect to.
  * @param ble_pin PIN for BLE device.
@@ -375,6 +473,19 @@ void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     // Holds up to BRIDGE_QUEUE_SIZE (defaults 100) "packets" of data
     tcp_to_ble_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
     ble_to_tcp_queue = xQueueCreate(BRIDGE_QUEUE_SIZE, sizeof(BridgePacket));
+
+    // Statically allocate MQTT downlink queue in .bss segment (zero heap fragmentation)
+    mqtt_to_ble_queue = xQueueCreateStatic(
+        MQTT_QUEUE_SIZE,
+        sizeof(BridgePacket),
+        mqtt_to_ble_queue_storage,
+        &mqtt_to_ble_queue_struct
+    );
+
+    // Register MQTT Downlink Callback to enqueue ToRadio packets for BLE transmission
+    mqtt_net_set_downlink_callback([](const uint8_t* to_radio_buf, size_t len) {
+        bridge_enqueue_mqtt_to_ble(to_radio_buf, len);
+    });
 
     // Mutex for thread safe modifying/reading of connected TCP clients.
     tcpClientsMutex = xSemaphoreCreateMutex();
@@ -422,4 +533,11 @@ BridgeDiagStats bridge_get_diag_stats() {
     stats.net_task_stack_free_bytes = bridgeNetTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeNetTaskHandle) * sizeof(StackType_t)) : 0;
     stats.ble_connected = bridge_is_ble_connected();
     return stats;
+}
+
+/**
+ * @return True if the BLE device is connected, false if not
+ */
+bool bridge_is_ble_connected() {
+    return (bleClient != NULL && bleClient->isConnected() && toRadioChar != NULL);
 }
