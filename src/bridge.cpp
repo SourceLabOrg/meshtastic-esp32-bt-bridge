@@ -448,7 +448,11 @@ static void bridgeNetTask(void* parameter) {
  * @return bool true on successful queueing, false if unable to queue.
  */
 bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
-    if (!mqtt_to_ble_queue || !data || len == 0 || len > sizeof(BridgePacket::data)) {
+    if (!mqtt_to_ble_queue || !data || len == 0) {
+        return false;
+    }
+    if (len > sizeof(BridgePacket::data)) {
+        log_e("[Bridge-MQTT] ERROR: Downlink packet too large (%zu bytes, max %zu)", len, sizeof(BridgePacket::data));
         return false;
     }
     BridgePacket packet;

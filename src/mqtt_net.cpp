@@ -246,14 +246,25 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
             to_radio.which_payload_variant = meshtastic_ToRadio_mqttClientProxyMessage_tag;
 
             meshtastic_MqttClientProxyMessage* proxy_msg = &to_radio.mqttClientProxyMessage;
-            size_t topicLen = (event->topic_len < (int)sizeof(proxy_msg->topic) - 1) ? event->topic_len : (sizeof(proxy_msg->topic) - 1);
+
+            if (event->topic_len >= (int)sizeof(proxy_msg->topic)) {
+                log_e("[MQTT] ERROR: Downlink topic exceeds protobuf capacity (%d >= %zu bytes). Dropping packet.",
+                      event->topic_len, sizeof(proxy_msg->topic));
+                break;
+            }
+            if ((size_t)event->data_len > sizeof(proxy_msg->payload_variant.data.bytes)) {
+                log_e("[MQTT] ERROR: Downlink payload exceeds protobuf capacity (%d > %zu bytes). Dropping packet.",
+                      event->data_len, sizeof(proxy_msg->payload_variant.data.bytes));
+                break;
+            }
+
+            size_t topicLen = event->topic_len;
             memcpy(proxy_msg->topic, event->topic, topicLen);
             proxy_msg->topic[topicLen] = '\0';
             proxy_msg->retained = (event->retain != 0);
 
             proxy_msg->which_payload_variant = meshtastic_MqttClientProxyMessage_data_tag;
-            size_t copyLen = ((size_t)event->data_len < sizeof(proxy_msg->payload_variant.data.bytes))
-                              ? event->data_len : sizeof(proxy_msg->payload_variant.data.bytes);
+            size_t copyLen = (size_t)event->data_len;
             memcpy(proxy_msg->payload_variant.data.bytes, event->data, copyLen);
             proxy_msg->payload_variant.data.size = copyLen;
 
