@@ -34,6 +34,12 @@ static StaticQueue_t mqtt_to_ble_queue_struct;
 static uint8_t mqtt_to_ble_queue_storage[MQTT_QUEUE_SIZE * sizeof(BridgePacket)];
 static QueueHandle_t mqtt_to_ble_queue = NULL;
 
+/**
+ * Tracks if we drop packets from our queues.
+ */
+static std::atomic<uint32_t> s_tcp_to_ble_dropped{0};
+static std::atomic<uint32_t> s_ble_to_tcp_dropped{0};
+
 struct ClientContext {
     AsyncClient* client;
     std::vector<uint8_t> rx_buffer;
@@ -116,9 +122,11 @@ static void onClientConnected(void* arg, AsyncClient* client) {
                         memcpy(packet.data, &ctx->rx_buffer[processed + 4], payload_len);
                         if (xQueueSend(tcp_to_ble_queue, &packet, pdMS_TO_TICKS(100)) != pdTRUE) {
                             log_w("[Bridge-TCP] WARNING: tcp_to_ble_queue full, dropped packet");
+                            s_tcp_to_ble_dropped.fetch_add(1, std::memory_order_relaxed);
                         }
                     } else {
                         log_e("[Bridge-TCP] ERROR: Payload too large (%u bytes)", payload_len);
+                        s_tcp_to_ble_dropped.fetch_add(1, std::memory_order_relaxed);
                     }
                     processed += 4 + payload_len;
                 } else {
@@ -330,9 +338,11 @@ static void bridgeBleTask(void* parameter) {
                                 // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
                                 if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
                                     log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
+                                    s_ble_to_tcp_dropped.fetch_add(1, std::memory_order_relaxed);
                                 }
                             } else {
                                 log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
+                                s_ble_to_tcp_dropped.fetch_add(1, std::memory_order_relaxed);
                             }
                         }
 
@@ -516,10 +526,13 @@ BridgeDiagStats bridge_get_diag_stats() {
     BridgeDiagStats stats = {};
     stats.tcp_to_ble_waiting = tcp_to_ble_queue ? uxQueueMessagesWaiting(tcp_to_ble_queue) : 0;
     stats.tcp_to_ble_capacity = BRIDGE_QUEUE_SIZE;
+    stats.tcp_to_ble_dropped = s_tcp_to_ble_dropped.load(std::memory_order_relaxed);
     stats.ble_to_tcp_waiting = ble_to_tcp_queue ? uxQueueMessagesWaiting(ble_to_tcp_queue) : 0;
     stats.ble_to_tcp_capacity = BRIDGE_QUEUE_SIZE;
+    stats.ble_to_tcp_dropped = s_ble_to_tcp_dropped.load(std::memory_order_relaxed);
     stats.mqtt_to_ble_waiting = mqtt_to_ble_queue ? uxQueueMessagesWaiting(mqtt_to_ble_queue) : 0;
     stats.mqtt_to_ble_capacity = MQTT_QUEUE_SIZE;
+    stats.mqtt_to_ble_dropped = mqtt_net_get_status().msgs_dropped;
     stats.connected_tcp_clients = connectedClientsCount.load();
     stats.ble_task_stack_free_bytes = bridgeBleTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeBleTaskHandle) * sizeof(StackType_t)) : 0;
     stats.net_task_stack_free_bytes = bridgeNetTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeNetTaskHandle) * sizeof(StackType_t)) : 0;

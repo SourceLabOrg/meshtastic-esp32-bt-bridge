@@ -10,10 +10,13 @@ void bridge_clear_mqtt_to_ble_queue();
 struct BridgeDiagStats {
     size_t tcp_to_ble_waiting;
     size_t tcp_to_ble_capacity;
+    uint32_t tcp_to_ble_dropped;
     size_t ble_to_tcp_waiting;
     size_t ble_to_tcp_capacity;
+    uint32_t ble_to_tcp_dropped;
     size_t mqtt_to_ble_waiting;
     size_t mqtt_to_ble_capacity;
+    uint32_t mqtt_to_ble_dropped;
     size_t connected_tcp_clients;
     uint32_t ble_task_stack_free_bytes;
     uint32_t net_task_stack_free_bytes;

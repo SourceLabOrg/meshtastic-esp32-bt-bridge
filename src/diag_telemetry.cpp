@@ -30,14 +30,14 @@ static void diagTelemetryTask(void* parameter) {
 
         char buf[320];
         snprintf(buf, sizeof(buf),
-                 "[Diag] Heap: %u KB (Min: %u KB, MaxBlock: %u KB) | WiFi: %d dBm | TCP: %zu | Queues: [T->B: %zu/%zu, B->T: %zu/%zu, M->B: %zu/%zu] | Stacks: [BLE: %u B, Net: %u B] | MQTT: %s (Tx: %u, Rx: %u, Drop: %u)",
+                 "[Diag] Heap: %u KB (Min: %u KB, MaxBlock: %u KB) | WiFi: %d dBm | TCP: %zu | Queues: [T->B: %zu/%zu (d:%u), B->T: %zu/%zu (d:%u), M->B: %zu/%zu (d:%u)] | Stacks: [BLE: %u B, Net: %u B] | MQTT: %s (Tx: %u, Rx: %u)",
                  freeHeap / 1024, minHeap / 1024, maxAlloc / 1024,
                  (int)rssi, bStats.connected_tcp_clients,
-                 bStats.tcp_to_ble_waiting, bStats.tcp_to_ble_capacity,
-                 bStats.ble_to_tcp_waiting, bStats.ble_to_tcp_capacity,
-                 bStats.mqtt_to_ble_waiting, bStats.mqtt_to_ble_capacity,
+                 bStats.tcp_to_ble_waiting, bStats.tcp_to_ble_capacity, bStats.tcp_to_ble_dropped,
+                 bStats.ble_to_tcp_waiting, bStats.ble_to_tcp_capacity, bStats.ble_to_tcp_dropped,
+                 bStats.mqtt_to_ble_waiting, bStats.mqtt_to_ble_capacity, bStats.mqtt_to_ble_dropped,
                  bStats.ble_task_stack_free_bytes, bStats.net_task_stack_free_bytes,
-                 mStats.state_str.c_str(), mStats.msgs_published, mStats.msgs_received, mStats.msgs_dropped);
+                 mStats.state_str.c_str(), mStats.msgs_published, mStats.msgs_received);
 
         Serial.printf("[ %7lu][I][diag] %s\n", millis(), buf);
 
