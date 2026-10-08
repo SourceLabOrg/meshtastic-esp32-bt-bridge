@@ -111,7 +111,7 @@
 
 // On disconnect from a broker, after how long will it attempt to reconnect, in milliseconds.
 #ifndef MQTT_RECONNECT_TIME_MS
-#define MQTT_RECONNECT_TIME_MS 7000
+#define MQTT_RECONNECT_TIME_MS 15000
 #endif
 
 // Internal MQTT client buffer size

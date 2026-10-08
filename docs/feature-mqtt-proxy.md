@@ -47,15 +47,23 @@ By using Auto-Sync:
 2. **No Topic Rewriting Complexity:** Avoids error-prone dynamic prefix rewriting across complex mesh channels.
 3. **Identical to Official Mobile Apps:** The bridge operates identically to the official Android/iOS apps when proxying.
 
-### 3.2 Radio MQTT Settings
-When a user configures MQTT via the official Meshtastic mobile or desktop apps, the settings are stored on the radio inside `ModuleConfig.mqtt`:
-* **`address`**: Hostname or IP of the broker (e.g. `mqtt.meshtastic.org`).
-* **`username`** & **`password`**: Broker credentials.
-* **`encryption_enabled`** (`bool`): Whether TLS/SSL (port 8883) is required.
-* **`root`**: Root topic prefix (e.g. `msh` or custom).
-* **`proxy_to_client_enabled`** (`bool`): Tells the radio to offload MQTT to the connected client.
+### 3.2 Radio MQTT Settings & Setup Checklist
 
-During the initial BLE connection sync, the radio transmits its configuration to the bridge via `FromRadio.config` / `FromRadio.moduleConfig`.
+For the bridge to act as an MQTT proxy, the physical radio must be configured with both the global MQTT module enabled and client proxying turned on.
+
+#### Required Radio Configuration (in the Meshtastic App):
+
+In the Meshtastic App (or Web UI / CLI), navigate to **Radio Configuration ➔ Module Configuration ➔ MQTT**:
+
+1. **`MQTT Enabled` (`enabled = true`):** Must be turned **ON**. This is the radio's master switch. If disabled, the radio ignores all MQTT packet generation.
+2. **`Proxy to Client Enabled` (`proxy_to_client_enabled = true`):** Must be turned **ON** (sometimes labeled *"Proxy"* or *"Client Proxy"* in apps). This instructs the radio to emit `MqttClientProxyMessage` packets over Bluetooth instead of attempting a direct WiFi connection.
+3. **`Server Address` (`address`):** Set to your broker hostname or IP (e.g. `mqtt.meshtastic.org` or `192.168.1.50`). Defaults to `mqtt.meshtastic.org` if left blank. (Explicit ports like `broker.local:1883` or `160.16.104.222:8883` are supported).
+4. **`Username` & `Password` (`username`, `password`):** Enter credentials if required by your broker.
+5. **`TLS Enabled` (`tls_enabled`):** Turn **ON** if connecting via secure port 8883 (MQTTS).
+6. **`Root Topic` (`root`):** Root topic prefix for your mesh (e.g. `msh` or `msh/US`).
+7. **Channel Uplink / Downlink:** In **Channels ➔ [Channel Name] ➔ Module Settings**, ensure **Uplink Enabled** and/or **Downlink Enabled** is toggled ON for the channel(s) you wish to bridge to MQTT.
+
+During the initial BLE connection, the bridge sends a `want_config_id` packet and receives `FromRadio.moduleConfig.mqtt`, automatically initializing the gateway session.
 
 ---
 

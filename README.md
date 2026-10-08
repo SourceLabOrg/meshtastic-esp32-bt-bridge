@@ -68,7 +68,7 @@ Once the bridge is running with a solid LED, it is entirely transparent!
 
 In addition to serving local TCP app clients, the bridge can act as an **autonomous MQTT Gateway** for your Bluetooth radio:
 
-* **Auto-Sync:** The bridge listens to your radio's `ModuleConfig.mqtt` settings over Bluetooth. If you enable MQTT Proxy on your radio (via the Meshtastic mobile app), the bridge automatically discovers your broker address, port, credentials, and root topic (`msh`, `ptp`, etc.) and connects seamlessly.
+* **Auto-Sync from Radio:** When MQTT is enabled on your radio (**MQTT Enabled** and **Proxy to Client Enabled** in the Meshtastic app), the bridge automatically discovers your broker address, port, credentials, root topic (`msh`, `ptp`, etc.), and TLS configuration over Bluetooth and establishes the connection.
 * **3-Tier TLS Security:** Supports public brokers (via an embedded Mozilla Root CA bundle for Let's Encrypt / DigiCert), custom/private CA certificates (uploadable via Web UI), or self-signed insecure mode.
 * **Dual-Queue Prioritization:** Prioritizes local app chats and commands while streaming background MQTT downlink packets to the radio.
 * **Disconnect Grace Period:** If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for up to 60 seconds and buffers incoming messages without losing your session.

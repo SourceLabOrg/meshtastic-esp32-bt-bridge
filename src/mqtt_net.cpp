@@ -558,13 +558,15 @@ void mqtt_net_apply_config(const MqttConfig& cfg) {
             mqtt_net_request_radio_config();
         }
     } else if (!currentStatus.radio_proxy_enabled) {
-        log_w("[MQTT] Radio configuration detected, but proxy_to_client_enabled is FALSE on the radio.");
+        log_w("[MQTT] Radio configuration detected, but MQTT proxy is inactive on the radio.");
         mqtt_net_stop_client();
         bridge_clear_mqtt_to_ble_queue();
-        mqtt_net_set_state(MQTT_STATE_DISABLED, "Radio Proxy Disabled (Enable in Meshtastic App)");
+        mqtt_net_set_state(MQTT_STATE_DISABLED, "Radio Proxy Disabled (Enable 'MQTT' & 'Proxy' in App)");
     } else if (bridge_is_ble_connected()) {
-        log_i("[MQTT] Applying Auto-Sync MQTT configuration -> %s:%u (Root: %s)",
-              currentStatus.radio_server.c_str(), currentStatus.radio_port, currentStatus.radio_root.c_str());
+        log_i(
+            "[MQTT] Applying Auto-Sync MQTT configuration -> %s:%u (Root: %s)",
+            currentStatus.radio_server.c_str(), currentStatus.radio_port, currentStatus.radio_root.c_str()
+        );
         mqtt_net_start_synced_client();
     } else {
         log_i("[MQTT] Radio configuration ready. Waiting for Bluetooth connection before connecting to broker...");
@@ -601,8 +603,7 @@ void mqtt_net_on_ble_connected() {
         // Connect to broker if radio configuration is ready and proxy is enabled
         log_i(
             "[MQTT] Bluetooth radio connected! Connecting to Synced MQTT broker -> %s:%u",
-            currentStatus.radio_server.c_str(),
-            currentStatus.radio_port
+            currentStatus.radio_server.c_str(), currentStatus.radio_port
         );
         mqtt_net_start_synced_client();
     }
@@ -676,10 +677,11 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
         if (radio_msg.moduleConfig.which_payload_variant == meshtastic_ModuleConfig_mqtt_tag) {
             const meshtastic_ModuleConfig_MQTTConfig& mqtt_cfg = radio_msg.moduleConfig.payload_variant.mqtt;
             log_i(
-                "[MQTT] Discovered ModuleConfig.mqtt from Radio: server='%s', root='%s', proxy_enabled=%d, tls=%d",
+                "[MQTT] Discovered ModuleConfig.mqtt from Radio: enabled=%d, proxy_enabled=%d, server='%s', root='%s', tls=%d",
+                mqtt_cfg.enabled,
+                mqtt_cfg.proxy_to_client_enabled,
                 mqtt_cfg.address,
                 mqtt_cfg.root,
-                mqtt_cfg.proxy_to_client_enabled,
                 mqtt_cfg.tls_enabled
             );
 
@@ -687,7 +689,7 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
             {
                 MqttLockGuard lock;
                 String rawAddress = String(mqtt_cfg.address);
-                currentStatus.radio_proxy_enabled = mqtt_cfg.proxy_to_client_enabled;
+                currentStatus.radio_proxy_enabled = (mqtt_cfg.enabled && mqtt_cfg.proxy_to_client_enabled);
                 currentStatus.radio_root = String(mqtt_cfg.root).isEmpty() ? "msh" : String(mqtt_cfg.root);
                 currentStatus.radio_tls = mqtt_cfg.tls_enabled;
                 currentStatus.radio_user = String(mqtt_cfg.username);
@@ -711,10 +713,11 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
                 currentStatus.radio_port = port;
 
                 if (!currentStatus.radio_proxy_enabled) {
-                    log_w("[MQTT] Radio reported proxy_to_client_enabled is FALSE. Stopping client.");
+                    const char* reason = !mqtt_cfg.enabled ? "MQTT Disabled on Radio (Enable 'MQTT' in App)" : "Radio Proxy Disabled (Enable 'Proxy to Client' in App)";
+                    log_w("[MQTT] Radio MQTT proxy is inactive (%s). Stopping client.", reason);
                     mqtt_net_stop_client();
                     bridge_clear_mqtt_to_ble_queue();
-                    mqtt_net_set_state(MQTT_STATE_DISABLED, "Radio Proxy Disabled (Enable in Meshtastic App)");
+                    mqtt_net_set_state(MQTT_STATE_DISABLED, reason);
                     return false;
                 }
 
