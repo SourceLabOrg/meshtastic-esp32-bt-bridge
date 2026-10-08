@@ -5,6 +5,7 @@
 #include "bridge.h"
 #include "build_options.h"
 #include "utils.h"
+#include "diag_telemetry.h"
 
 /**
  * Main Entry point.
@@ -96,6 +97,9 @@ void setup() {
             // Init and start bridge BLE <--> WIFI
             bridge_init(cfg.ble_mac, cfg.ble_pin.toInt());
             bridge_start();
+
+            // Start periodic diagnostic telemetry task (Core 0, Priority 1, every 15s)
+            diag_telemetry_start();
         } else {
             log_i("[BOOT] WiFi Connection Failed! Falling back to Setup Mode.");
             wifi_net_start_ap();
