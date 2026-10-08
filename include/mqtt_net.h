@@ -46,8 +46,14 @@ struct MqttStatus {
     // Counters/State.
     uint32_t msgs_published = 0;
     uint32_t msgs_received = 0;
+    uint32_t msgs_dropped = 0;
     String last_error = "";
 };
+
+/**
+ * Record a dropped MQTT downlink message (e.g. queue overflow).
+ */
+void mqtt_net_record_dropped();
 
 /**
  * Callback to push ToRadio downlink packets into the BLE transmit queue

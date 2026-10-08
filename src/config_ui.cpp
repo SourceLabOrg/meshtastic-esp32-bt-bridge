@@ -402,7 +402,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
           }
           document.getElementById('view-mqtt-root').innerText = st.active_root || st.radio_root || 'msh';
-          document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (st.published || 0) + ' sent / ▼ ' + (st.received || 0) + ' rcvd';
+          document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (st.published || 0) + ' sent / ▼ ' + (st.received || 0) + ' rcvd / ✖ ' + (st.dropped || 0) + ' dropped';
         })
         .catch(() => {});
     }

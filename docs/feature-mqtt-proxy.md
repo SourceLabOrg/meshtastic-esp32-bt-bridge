@@ -409,7 +409,3 @@ To support verified TLS connections to public MQTT brokers (such as `mqtt.meshta
 
 ### 9.2 Selective Downlink Topic Subscriptions
 * Provide granular channel filtering options (e.g. subscribe only to primary channel `#` or specific downlink subtopics) to further reduce BLE queue bandwidth in congested mesh regions.
-
-### 9.3 Dynamic WebUI MQTT Telemetry & Diagnostics
-* Expose live publish/receive counters (e.g. `Messages Published`, `Messages Received`, `Packets Dropped Due to Overflow`) in the WebUI MQTT status card.
-

@@ -28,6 +28,11 @@ static std::atomic<bool> s_mqtt_enabled{false};
  */
 static std::atomic<uint32_t> s_msgs_published{0};
 static std::atomic<uint32_t> s_msgs_received{0};
+static std::atomic<uint32_t> s_msgs_dropped{0};
+
+void mqtt_net_record_dropped() {
+    s_msgs_dropped.fetch_add(1, std::memory_order_relaxed);
+}
 
 /**
  * Callback to disable certificate validation for self-signed or insecure TLS
@@ -774,6 +779,7 @@ MqttStatus mqtt_net_get_status() {
     }
     st.msgs_published = s_msgs_published.load(std::memory_order_relaxed);
     st.msgs_received = s_msgs_received.load(std::memory_order_relaxed);
+    st.msgs_dropped = s_msgs_dropped.load(std::memory_order_relaxed);
     return st;
 }
 
@@ -793,6 +799,7 @@ String mqtt_net_get_status_json() {
     json += "\"active_tls\":" + String(st.active_tls ? "true" : "false") + ",";
     json += "\"published\":" + String(st.msgs_published) + ",";
     json += "\"received\":" + String(st.msgs_received) + ",";
+    json += "\"dropped\":" + String(st.msgs_dropped) + ",";
     json += "\"last_error\":\"" + utils_escape_json(st.last_error) + "\"";
     json += "}";
     return json;

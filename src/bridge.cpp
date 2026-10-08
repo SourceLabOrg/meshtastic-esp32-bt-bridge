@@ -408,6 +408,7 @@ bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
     }
     if (len > sizeof(BridgePacket::data)) {
         log_e("[Bridge-MQTT] ERROR: Downlink packet too large (%zu bytes, max %zu)", len, sizeof(BridgePacket::data));
+        mqtt_net_record_dropped();
         return false;
     }
     BridgePacket packet;
@@ -415,6 +416,7 @@ bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
     memcpy(packet.data, data, len);
     if (xQueueSend(mqtt_to_ble_queue, &packet, 0) != pdTRUE) {
         log_w("[Bridge-MQTT] WARNING: mqtt_to_ble_queue full (%d packets), dropped downlink packet", MQTT_QUEUE_SIZE);
+        mqtt_net_record_dropped();
         return false;
     }
     return true;
