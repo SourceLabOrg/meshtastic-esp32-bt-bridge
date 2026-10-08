@@ -151,7 +151,9 @@ To prevent high-volume MQTT mesh traffic from blocking interactive phone app com
 
 1. **`tcp_to_ble_queue` (High Priority):** Carries locally generated phone app commands and chat packets. `bridgeBleTask` always checks and drains this queue first.
 2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty.
-3. **Static Allocation (.bss segment):** Both queues are statically reserved (`MQTT_QUEUE_SIZE = 40`), consuming ~20.6 KB of `.bss` memory with **zero heap fragmentation risk**.
+3. **Static Allocation (.bss segment):** All packet queues are statically reserved with zero dynamic `malloc` overhead:
+   * **ESP32-S3:** `BRIDGE_QUEUE_SIZE = 100` (58.4 KB each), `MQTT_QUEUE_SIZE = 40` (23.4 KB) — total ~140 KB `.bss` queue RAM.
+   * **ESP32 Classic (`esp32dev`):** `BRIDGE_QUEUE_SIZE = 32` (18.7 KB each), `MQTT_QUEUE_SIZE = 16` (9.3 KB) — total ~46.7 KB `.bss` queue RAM, preserving ~50 KB+ of runtime free heap for TLS and networking.
 
 ### 4.6 Connection Lifecycle & Disconnect Grace Period Model
 
@@ -216,7 +218,8 @@ flowchart TD
 
 | Build Flag | Default | Description |
 | :--- | :--- | :--- |
-| `MQTT_QUEUE_SIZE` | `40` | Statically allocated packet buffer capacity for MQTT downlink messages |
+| `BRIDGE_QUEUE_SIZE` | `100` (S3) / `32` (Classic) | Statically allocated packet capacity for TCP <-> BLE message queues |
+| `MQTT_QUEUE_SIZE` | `40` (S3) / `16` (Classic) | Statically allocated packet buffer capacity for MQTT downlink messages |
 | `MQTT_BLE_GRACE_PERIOD_SECONDS` | `60` | Duration to keep MQTT broker alive during transient Bluetooth disconnects |
 
 ### 5.3 WebUI Design & Components

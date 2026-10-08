@@ -61,7 +61,16 @@ Because BLE operations (connecting, reading characteristics) can block, and we a
 
 ### 4. Memory Management (100% Static `.bss` Queues)
 - **Zero Heap Fragmentation**: All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, `mqtt_to_ble_queue`) are allocated statically in `.bss` via `xQueueCreateStatic`.
-- `BridgePacket` uses a fixed `uint8_t data[512]` array, and TCP frames use stack memory (`uint8_t frame[516]`), ensuring zero dynamic `malloc`/`free` calls in fast-path routing.
+- **Packet Sizing (`MESHTASTIC_MAX_PACKET_SIZE = 576`)**: `BridgePacket` uses a fixed `uint8_t data[576]` array (584 bytes per slot aligned), accounting for max 512-byte payload + 32-byte topic + headers. TCP frames use stack memory (`uint8_t frame[580]`), ensuring zero dynamic `malloc`/`free` calls in fast-path routing.
+- **Target-Specific Queue Sizing & DRAM Sizing**:
+  - **ESP32-S3 Targets** (`seeed_xiao_esp32s3`, `esp32-s3-devkitc-1` with 512 KB SRAM):
+    - `BRIDGE_QUEUE_SIZE = 100` (58.4 KB per queue)
+    - `MQTT_QUEUE_SIZE = 40` (23.4 KB)
+    - Total static queue memory: ~140 KB with abundant DRAM headroom.
+  - **ESP32 Classic Targets** (`esp32dev` / WROOM-32 with 320 KB SRAM):
+    - `BRIDGE_QUEUE_SIZE = 32` (18.7 KB per queue)
+    - `MQTT_QUEUE_SIZE = 16` (9.3 KB)
+    - Total static queue memory: ~46.7 KB in `.bss`, leaving ~50 KB+ of free runtime heap for TLS handshakes and socket buffers.
 
 ### 5. Client Limits & Auto-Discovery
 - **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.
