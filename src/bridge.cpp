@@ -384,6 +384,9 @@ void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     tcpServer->onClient(&onClientConnected, tcpServer);
 }
 
+static TaskHandle_t bridgeBleTaskHandle = NULL;
+static TaskHandle_t bridgeNetTaskHandle = NULL;
+
 void bridge_start() {
     // If already running, refuse to start (again).
     if (bridgeRunning) {
@@ -395,8 +398,28 @@ void bridge_start() {
     log_i("[Bridge] TCP Server started on port %d", TCP_PORT);
 
     // Starts the BLE task and pins to CPU core 1
-    xTaskCreatePinnedToCore(bridgeBleTask, "bridge_ble", 8192, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(bridgeBleTask, "bridge_ble", 8192, NULL, 1, &bridgeBleTaskHandle, 1);
 
     // Starts the TCP/Net task and pins to CPU core 0
-    xTaskCreatePinnedToCore(bridgeNetTask, "bridge_net", 4096, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(bridgeNetTask, "bridge_net", 4096, NULL, 1, &bridgeNetTaskHandle, 0);
+}
+
+/**
+ * @return True if the BLE device is connected, false if not
+ */
+bool bridge_is_ble_connected() {
+    return (bleClient != NULL && bleClient->isConnected() && toRadioChar != NULL);
+}
+
+BridgeDiagStats bridge_get_diag_stats() {
+    BridgeDiagStats stats = {};
+    stats.tcp_to_ble_waiting = tcp_to_ble_queue ? uxQueueMessagesWaiting(tcp_to_ble_queue) : 0;
+    stats.tcp_to_ble_capacity = BRIDGE_QUEUE_SIZE;
+    stats.ble_to_tcp_waiting = ble_to_tcp_queue ? uxQueueMessagesWaiting(ble_to_tcp_queue) : 0;
+    stats.ble_to_tcp_capacity = BRIDGE_QUEUE_SIZE;
+    stats.connected_tcp_clients = connectedClientsCount.load();
+    stats.ble_task_stack_free_bytes = bridgeBleTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeBleTaskHandle) * sizeof(StackType_t)) : 0;
+    stats.net_task_stack_free_bytes = bridgeNetTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeNetTaskHandle) * sizeof(StackType_t)) : 0;
+    stats.ble_connected = bridge_is_ble_connected();
+    return stats;
 }
