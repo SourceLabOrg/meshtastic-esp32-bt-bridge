@@ -663,20 +663,14 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
         const meshtastic_MqttClientProxyMessage& proxy_msg = radio_msg.mqttClientProxyMessage;
         log_d("[MQTT] Intercepted MqttClientProxyMessage for topic '%s'", proxy_msg.topic);
 
-        bool isEnabled = false;
-        {
-            MqttLockGuard lock;
-            isEnabled = currentConfig.enabled;
-        }
-
-        if (isEnabled && mqttClient) {
+        if (s_mqtt_enabled.load(std::memory_order_relaxed)) {
             if (proxy_msg.which_payload_variant == meshtastic_MqttClientProxyMessage_data_tag) {
                 mqtt_net_publish(proxy_msg.topic, proxy_msg.payload_variant.data.bytes, proxy_msg.payload_variant.data.size, proxy_msg.retained);
             } else if (proxy_msg.which_payload_variant == meshtastic_MqttClientProxyMessage_text_tag) {
                 size_t textLen = strlen(proxy_msg.payload_variant.text);
                 mqtt_net_publish(proxy_msg.topic, (const uint8_t*)proxy_msg.payload_variant.text, textLen, proxy_msg.retained);
             }
-            // Return true to consume packet and prevent echoing duplicate proxy packets to TCP clients
+            // Always consume when MQTT gateway is enabled so phone apps never receive raw proxy messages
             return true;
         }
     }

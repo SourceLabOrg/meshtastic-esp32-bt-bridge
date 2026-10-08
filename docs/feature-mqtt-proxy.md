@@ -114,19 +114,24 @@ During the initial BLE connection sync, the radio transmits its configuration to
      * **Packet Filtering:** When the ESP32 Bridge's MQTT client is enabled, the bridge intercepts and consumes `FromRadio.mqttClientProxyMessage` packets so they are published to MQTT directly and *not* duplicated onto the TCP client stream.
      * **UI / User Guidance:** The WebUI and documentation instruct users to disable the proxy toggle in upstream TCP clients (like MeshMonitor) when the bridge's native MQTT feature is enabled.
 
-### 4.4 Connection Lifecycle & Failure Recovery Model
+### 4.4 Packet Routing & Filtering Reference
 
-```mermaid
-flowchart TD
-    A[ESP32 Normal Boot] --> B[Connect to WiFi Station]
-    B --> C{Bluetooth Connected?}
-    C -- No --> D[Set State: Waiting for Radio<br>Broker Connection Deferred]
-    C -- Yes --> E[Wait for FromRadio.moduleConfig.mqtt]
-    D -->|BLE Connects & Subscribes| E
-    E -->|Config Received + proxy_to_client_enabled=true| F[Connect to Synced Broker]
-    F --> G[MQTT Active & Subscribed]
-    G --> H{Bluetooth Drops?}
-### 4.4 Dual-Queue Architecture & Command Prioritization
+The bridge routes and filters packets across BLE, TCP, and MQTT according to the following rules:
+
+#### Packets Coming FROM the Bluetooth Radio (BLE ➔ Bridge)
+| Packet Type | Purpose | Bridge Action | Forwarded to TCP Phone Apps? |
+| :--- | :--- | :--- | :--- |
+| **`MqttClientProxyMessage`** | Uplink mesh data destined for MQTT | Published directly to MQTT broker by the bridge. | ❌ **No (Filtered / Consumed)** — Prevents phone apps from duplicating uploads. |
+| **`ModuleConfig.mqtt`** | Radio's MQTT broker configuration | Bridge snoops settings to auto-connect to broker. | ✅ **Yes** — Forwarded so phone apps can read their radio settings. |
+| **Standard Mesh Packets** | Messages, GPS, NodeDB, Telemetry, Channels | Encapsulated in standard `0x94 0xC3` TCP framing. | ✅ **Yes** — Broadcast to all connected TCP apps. |
+
+#### Packets Going TO the Bluetooth Radio (➔ BLE Radio)
+| Source | Direction | Bridge Action | Sent to Radio? |
+| :--- | :--- | :--- | :--- |
+| **TCP Phone App** | Phone App ➔ Radio | Strips `0x94 0xC3` framing and writes directly to `ToRadio` characteristic (high priority). | ✅ **Yes** |
+| **MQTT Broker** | Internet MQTT ➔ Radio | Wraps incoming downlink payload into a `ToRadio` envelope and writes to `ToRadio`. | ✅ **Yes** |
+
+### 4.5 Dual-Queue Architecture & Command Prioritization
 
 To prevent high-volume MQTT mesh traffic from blocking interactive phone app commands (such as changing channel settings or sending direct messages), the bridge maintains two separate, statically allocated FreeRTOS queues:
 
@@ -148,7 +153,7 @@ To prevent high-volume MQTT mesh traffic from blocking interactive phone app com
 2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty.
 3. **Static Allocation (.bss segment):** Both queues are statically reserved (`MQTT_QUEUE_SIZE = 40`), consuming ~20.6 KB of `.bss` memory with **zero heap fragmentation risk**.
 
-### 4.5 Connection Lifecycle & Disconnect Grace Period Model
+### 4.6 Connection Lifecycle & Disconnect Grace Period Model
 
 ```mermaid
 flowchart TD
@@ -378,7 +383,30 @@ To support verified TLS connections to public MQTT brokers (such as `mqtt.meshta
 
 ### Phase 6: Verification & Testing 🔲
 - [x] Multi-target compiler verification across `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1`.
-- [ ] Hardware test: Auto-Sync mode with radio configured for `mqtt.meshtastic.org`.
-- [ ] Hardware test: Manual Override mode with local broker (port 1883) and TLS broker (port 8883).
-- [ ] Hardware test: Simultaneous TCP client connection (Meshtastic Web UI) during active MQTT proxying.
-- [ ] Hardware test: Edge cases (broker outage recovery, BLE disconnect/reconnect, WiFi drop/reconnect).
+- [ ] Hardware test: Auto-Sync mode with radio configured for public `mqtt.meshtastic.org:8883` (Mozilla Root CA verification).
+- [ ] Hardware test: Custom broker with self-signed TLS (`mqtt_tls_insec = true`) and private Custom Root CA PEM verification.
+- [ ] Hardware test: Simultaneous TCP client connection (Meshtastic App / Web UI) during active MQTT proxying (verify dual-queue arbitration and `MqttClientProxyMessage` filtering).
+- [ ] Hardware test: Edge cases and transient failure recovery (MQTT broker outage recovery, BLE disconnect/reconnect within 60s grace period, 60s grace timer expiry, WiFi drop/reconnect).
+- [ ] Hardware test: Queue saturation stress test (downlink traffic during BLE drop with >40 queued packets).
+
+---
+
+## 9. Phase 7: Future Improvements & Potential Enhancements
+
+### 9.1 Configurable MQTT Proxy Passthrough to TCP Clients
+* **Current Default Behavior:** When the MQTT Gateway is enabled, incoming `FromRadio` packets containing `MqttClientProxyMessage` (field 14) are published directly to the MQTT broker and consumed (stripped) so they are not forwarded to connected TCP clients (preventing duplicate publishes from connected phone apps).
+* **Proposed Enhancement:** Add an optional configuration toggle in NVS (`mqtt_strip_proxy`, default `true`) and the WebUI:
+  * **Setting Name:** *"Strip MQTT proxy messages to connected clients to prevent duplication"* (Toggle: `Yes` / `No`, Default: `Yes`).
+  * **Option `Yes` (Default):** The bridge consumes `MqttClientProxyMessage` packets after publishing them to MQTT. TCP clients do not receive raw proxy envelopes.
+  * **Option `No` (Passthrough Mode):** The bridge publishes to MQTT *and* forwards the raw `MqttClientProxyMessage` packets to all connected TCP clients.
+  * **Use Cases for Passthrough (`No`):**
+    * Diagnostic tools and raw packet sniffers connected over TCP.
+    * External analytics/monitoring software requiring raw telemetry/proxy streams.
+    * Multi-client proxy configurations where the TCP client explicitly manages deduplication.
+
+### 9.2 Selective Downlink Topic Subscriptions
+* Provide granular channel filtering options (e.g. subscribe only to primary channel `#` or specific downlink subtopics) to further reduce BLE queue bandwidth in congested mesh regions.
+
+### 9.3 Dynamic WebUI MQTT Telemetry & Diagnostics
+* Expose live publish/receive counters (e.g. `Messages Published`, `Messages Received`, `Packets Dropped Due to Overflow`) in the WebUI MQTT status card.
+
