@@ -657,12 +657,27 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
                 MqttLockGuard lock;
                 String rawAddress = String(mqtt_cfg.address);
                 currentStatus.radio_proxy_enabled = mqtt_cfg.proxy_to_client_enabled;
-                currentStatus.radio_server = rawAddress.isEmpty() ? "mqtt.meshtastic.org" : rawAddress;
                 currentStatus.radio_root = String(mqtt_cfg.root).isEmpty() ? "msh" : String(mqtt_cfg.root);
-                currentStatus.radio_tls = mqtt_cfg.tls_enabled || mqtt_cfg.encryption_enabled;
-                currentStatus.radio_port = currentStatus.radio_tls ? 8883 : 1883;
+                currentStatus.radio_tls = mqtt_cfg.tls_enabled;
                 currentStatus.radio_user = String(mqtt_cfg.username);
                 radioPassword = String(mqtt_cfg.password);
+
+                String server = rawAddress.isEmpty() ? "mqtt.meshtastic.org" : rawAddress;
+                uint16_t port = currentStatus.radio_tls ? 8883 : 1883;
+
+                // If the radio address explicitly specifies a port (e.g. "160.16.104.222:1883" or "broker.local:8883")
+                int colonIdx = server.indexOf(':');
+                if (colonIdx > 0) {
+                    String portStr = server.substring(colonIdx + 1);
+                    server = server.substring(0, colonIdx);
+                    int parsedPort = portStr.toInt();
+                    if (parsedPort > 0 && parsedPort <= 65535) {
+                        port = (uint16_t)parsedPort;
+                    }
+                }
+
+                currentStatus.radio_server = server;
+                currentStatus.radio_port = port;
 
                 if (!currentStatus.radio_proxy_enabled) {
                     log_w("[MQTT] Radio reported proxy_to_client_enabled is FALSE. Stopping client.");
