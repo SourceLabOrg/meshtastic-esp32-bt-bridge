@@ -479,6 +479,30 @@ void mqtt_net_loop() {
 }
 
 /**
+ * Asks the connected Meshtastic radio to send its configuration (ModuleConfig, NodeInfo, Channels)
+ * by sending a ToRadio packet with a random want_config_id nonce.
+ */
+static void mqtt_net_request_radio_config() {
+    meshtastic_ToRadio req = meshtastic_ToRadio_init_default;
+    req.which_payload_variant = meshtastic_ToRadio_want_config_id_tag;
+    uint32_t nonce = esp_random();
+    req.want_config_id = (nonce != 0) ? nonce : 1;
+
+    uint8_t buf[16];
+    pb_ostream_t stream = pb_ostream_from_buffer(buf, sizeof(buf));
+    if (pb_encode(&stream, meshtastic_ToRadio_fields, &req)) {
+        if (downlinkCallback) {
+            log_i("[MQTT] Requesting radio configuration (want_config_id: %u)...", req.want_config_id);
+            downlinkCallback(buf, stream.bytes_written);
+        } else {
+            log_w("[MQTT] Cannot request radio config: no downlink callback registered to push message to.");
+        }
+    } else {
+        log_e("[MQTT] Failed to encode want_config_id protobuf: %s", PB_GET_ERROR(&stream));
+    }
+}
+
+/**
  * Updates the MQTT Gateway configuration from the webui.
  * @param cfg The configuration to apply.
  */
@@ -499,6 +523,9 @@ void mqtt_net_apply_config(const MqttConfig& cfg) {
     if (currentStatus.radio_server.isEmpty()) {
         log_i("[MQTT] Enabled. Waiting for radio ModuleConfig.mqtt packets over Bluetooth...");
         mqtt_net_set_state(MQTT_STATE_WAITING_RADIO_CONFIG);
+        if (bridge_is_ble_connected()) {
+            mqtt_net_request_radio_config();
+        }
     } else if (!currentStatus.radio_proxy_enabled) {
         log_w("[MQTT] Radio configuration detected, but proxy_to_client_enabled is FALSE on the radio.");
         mqtt_net_stop_client();
@@ -514,6 +541,12 @@ void mqtt_net_apply_config(const MqttConfig& cfg) {
     }
 }
 
+/**
+ * Check state of the mqtt subsystem.
+ * NOTE: only tells if its enabled/disabled, not the connected state or anything like that.
+ *
+ * @return Returns true if MQTT Gateway feature is enabled (atomic, wait-free fast path)
+ */
 bool mqtt_net_is_enabled() {
     return s_mqtt_enabled.load(std::memory_order_relaxed);
 }
@@ -522,21 +555,19 @@ bool mqtt_net_is_enabled() {
  * Called when the BLE device is connected.
  */
 void mqtt_net_on_ble_connected() {
-    MqttLockGuard lock;
-    mqtt_net_reset_grace_timer();
-
-    if (!currentConfig.enabled) {
+    // Fast wait-free check: do nothing if MQTT Gateway is disabled
+    if (!mqtt_net_is_enabled()) {
         return;
     }
+
+    MqttLockGuard lock;
+    mqtt_net_reset_grace_timer();
 
     // If we are already connected to the broker (during grace period) and session is active, keep it!
     if (mqttClient && currentSession.is_active) {
         log_i("[MQTT] Bluetooth radio reconnected within grace period! Preserving active broker session.");
-        return;
-    }
-
-    // Connect to broker if radio configuration is ready and proxy is enabled
-    if (currentStatus.radio_proxy_enabled && !currentStatus.radio_server.isEmpty() && !mqttClient) {
+    } else if (currentStatus.radio_proxy_enabled && !currentStatus.radio_server.isEmpty() && !mqttClient) {
+        // Connect to broker if radio configuration is ready and proxy is enabled
         log_i(
             "[MQTT] Bluetooth radio connected! Connecting to Synced MQTT broker -> %s:%u",
             currentStatus.radio_server.c_str(),
@@ -544,6 +575,9 @@ void mqtt_net_on_ble_connected() {
         );
         mqtt_net_start_synced_client();
     }
+
+    // Always query the radio on connect to ensure any changed settings (swapped radio, updated credentials) are detected
+    mqtt_net_request_radio_config();
 }
 
 /**
