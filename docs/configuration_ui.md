@@ -18,6 +18,13 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * In Edit mode, offers a live scan dropdown with RSSI signal strengths, manual MAC entry, and 6-digit PIN input.
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
   * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
+* **MQTT Gateway Card:**
+  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, and published/received telemetry packet counters.
+  * In Edit mode, offers:
+    * **Enable MQTT Gateway** toggle.
+    * **Skip Certificate Validation** toggle (for self-signed / local LAN brokers).
+    * **Custom CA Root Certificate** textarea for uploading private PEM certificates.
+  * Independent **Save MQTT Settings** button persists settings to NVS and applies them immediately.
 * **System Actions Card:**
   * Contains a toggle for **Enable Serial Debug Logs**.
   * Contains a **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
@@ -48,7 +55,8 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 
 2. **Web Server Endpoints (`config_ui.cpp`)**:
    * **`GET /`**: Serves the single-page HTML/CSS/JS application with explicit UTF-8 encoding.
-   * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false}`.
+   * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_insecure":false,"mqtt_custom_ca":"..."}`.
+   * **`GET /mqtt_status`**: Returns live MQTT gateway telemetry JSON: `{"state":"CONNECTED","active_server":"...","active_port":8883,"published":12,"received":45,...}`.
    * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
    * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
    * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.
@@ -57,6 +65,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
    * **`GET /test_ble_status`**: Polls the test task state and returns result JSON (`{"status":"done","success":true,"message":"..."}`).
    * **`POST /save_wifi`**: Saves `wifi_ssid` and `wifi_pass` to NVS.
    * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS.
+   * **`POST /save_mqtt`**: Saves `mqtt_enabled`, `mqtt_insecure`, and `mqtt_custom_ca` to NVS and applies changes live.
    * **`POST /save_system`**: Saves `debug_logs` boolean flag to NVS.
    * **`POST /reboot`**: Restarts the ESP32 into normal bridge mode.
    * **`POST /reset`**: Erases all stored NVS configurations and reboots the ESP32 into Setup Mode.
@@ -70,6 +79,9 @@ The following keys are stored in the `Preferences` namespace (`bridge_cfg`):
 * `ble_mac` (String)
 * `ble_pin` (String)
 * `debug_logs` (Bool)
+* `mqtt_enabled` (Bool)
+* `mqtt_insecure` (Bool)
+* `mqtt_custom_ca` (String)
 
 ## Technical Decisions & Considerations
 * **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for WiFi and Bluetooth. Using `ESPAsyncWebServer` combined with asynchronous background tasks for BLE operations prevents HTTP request timeouts and prevents radio collisions while switching between WiFi AP and BLE scanning/testing.

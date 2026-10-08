@@ -57,17 +57,28 @@ meshtastic-esp32-bt-bridge/
 ├── .devcontainer/         # Docker dev environment definitions
 │   └── devcontainer.json
 ├── .github/workflows/     # CI/CD pipelines (pr_check.yml, pages.yml, release.yml)
+├── data/
+│   └── cert/              # Embedded Mozilla Root CA binary bundle (x509_crt_bundle.bin)
 ├── docs/                  # Additional documentation
 │   ├── architecture.md    # System architecture
 │   ├── bridge_architecture.md # Network & Bridge details
 │   ├── configuration_ui.md# Captive portal design
-│   ├── development.md     # Build guide & Release instructions
+│   ├── development.md     # Build guide, queue sizing & release instructions
+│   ├── feature-mqtt-proxy.md # Standalone MQTT Gateway & Proxy architecture
 │   └── user_guide.md      # End-user manual and LED reference
 ├── include/               # Header files
+│   ├── bridge.h
+│   ├── build_options.h
+│   ├── config_ui.h
+│   ├── mqtt_net.h         # MQTT subsystem interface & state types
+│   ├── status_led.h
+│   ├── utils.h
+│   └── wifi_net.h
 ├── src/                   # C++ Source code
 │   ├── main.cpp           # Main application loop
-│   ├── bridge.cpp         # Logic for bridging TCP and BLE streams
+│   ├── bridge.cpp         # Logic for bridging TCP, MQTT, and BLE streams (dual queues)
 │   ├── ble_client.cpp     # NimBLE client and security callbacks
+│   ├── mqtt_net.cpp       # MQTT Gateway subsystem (Auto-Sync, 3-tier TLS)
 │   ├── wifi_net.cpp       # WiFi, AP Mode, and mDNS management
 │   ├── config_ui.cpp      # Captive portal / Preferences logic
 │   └── status_led.cpp     # Asynchronous LED visual indicators

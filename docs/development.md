@@ -95,7 +95,30 @@ build_flags =
 - `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration. (Default: `4`).
 - `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to keep in memory from discovery scan. (Default: `60`).
 - `WIFI_MAX_NETWORKS_DISCOVERABLE`: Maximum number of WiFi networks to keep in memory from discovery scan. (Default: `30`).
-- `BRIDGE_QUEUE_SIZE`: Size of the FreeRTOS message queues between BLE and TCP tasks. (Default: `100`).
+- `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `100` on ESP32-S3, `48` on `esp32dev`).
+- `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `40` on ESP32-S3, `24` on `esp32dev`).
+
+### Static FreeRTOS Queues & RAM Sizing Math
+All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, and `mqtt_to_ble_queue`) are statically allocated in the `.bss` segment using `xQueueCreateStatic` to prevent runtime dynamic heap fragmentation and eliminate Out-Of-Memory crashes.
+
+Each `BridgePacket` holds a 512-byte payload plus length metadata ($\approx 520\text{ bytes}$).
+
+#### 1. ESP32-S3 Boards (`seeed_xiao_esp32s3`, `esp32-s3-devkitc-1`)
+* **Hardware SRAM:** 320 KB contiguous internal SRAM.
+* **Queue Allocations:**
+  - `tcp_to_ble_queue`: $100 \text{ packets} \times 520\text{ B} = 52.0\text{ KB}$
+  - `ble_to_tcp_queue`: $100 \text{ packets} \times 520\text{ B} = 52.0\text{ KB}$
+  - `mqtt_to_ble_queue`: $40 \text{ packets} \times 520\text{ B} = 20.8\text{ KB}$
+  - **Total Static Queue RAM:** $\approx 124.8\text{ KB}$ (54.5% total DRAM used, leaving $>140\text{ KB}$ of runtime heap).
+
+#### 2. Classic ESP32 Boards (`esp32dev` / WROOM-32)
+* **Hardware Architecture:** The original ESP32 reserves $\approx 130\text{ KB}$ of internal DRAM for its Bluetooth Classic baseband controller, ROM tables, and WiFi MAC/PHY, leaving $\approx 180\text{ KB}$ of total application DRAM (`dram0_0_seg`).
+* **Why 100-packet queues caused linker overflow:** A 124.8 KB static queue allocation combined with framework globals exceeded the linker's fixed static DRAM boundary by ~57 KB.
+* **Board-Specific Sizing in `platformio.ini`:**
+  - `BRIDGE_QUEUE_SIZE = 48`: $48 \times 520\text{ B} = 24.9\text{ KB}$ per queue ($49.8\text{ KB}$ total).
+  - `MQTT_QUEUE_SIZE = 24`: $24 \times 520\text{ B} = 12.5\text{ KB}$.
+  - **Total Static Queue RAM:** $\approx 62.3\text{ KB}$ (saves $62.5\text{ KB}$ of DRAM).
+* **Result:** `esp32dev` compiles with zero static DRAM overflow and retains $\approx 90\text{ KB}$ of free runtime heap for TLS negotiation (`mbedtls`), AsyncTCP buffers, and WebUI requests.
 
 ---
 ## 7. Logging & Debugging

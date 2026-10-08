@@ -64,6 +64,15 @@ Once the bridge is running with a solid LED, it is entirely transparent!
 
 > **Note:** The bridge supports multiplexing, meaning **up to 3 clients** (e.g., your phone, your tablet, and your desktop) can all connect to the radio simultaneously over WiFi!
 
+### Standalone MQTT Gateway & Proxy (Optional)
+
+In addition to serving local TCP app clients, the bridge can act as an **autonomous MQTT Gateway** for your Bluetooth radio:
+
+* **Auto-Sync:** The bridge listens to your radio's `ModuleConfig.mqtt` settings over Bluetooth. If you enable MQTT Proxy on your radio (via the Meshtastic mobile app), the bridge automatically discovers your broker address, port, credentials, and root topic (`msh`, `ptp`, etc.) and connects seamlessly.
+* **3-Tier TLS Security:** Supports public brokers (via an embedded Mozilla Root CA bundle for Let's Encrypt / DigiCert), custom/private CA certificates (uploadable via Web UI), or self-signed insecure mode.
+* **Dual-Queue Prioritization:** Prioritizes local app chats and commands while streaming background MQTT downlink packets to the radio.
+* **Disconnect Grace Period:** If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for up to 60 seconds and buffers incoming messages without losing your session.
+
 ### Re-configuring the Bridge
 
 If you ever need to change your WiFi credentials or connect to a different Meshtastic radio, you have two options:

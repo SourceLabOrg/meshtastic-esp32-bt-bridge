@@ -32,31 +32,36 @@ Meshtastic devices utilize different BLE address types depending on the manufact
 ## C++ ESP32 Implementation Strategy
 
 ### 1. Multithreading & Tasks
-Because BLE operations (connecting, reading characteristics) can block, and we are using `ESPAsyncTCP` (which runs on Core 0), we must separate concerns using FreeRTOS tasks and queues:
-- **Core 0 (Network)**: TCP Server (port 4403). Parses incoming TCP streams, creates frames, and pushes to a `tcp_to_ble_queue`. It also listens on a `ble_to_tcp_queue` to broadcast outgoing frames to connected clients.
-- **Core 1 (BLE)**: A dedicated `bridge_task` that maintains the BLE connection. It waits on the `tcp_to_ble_queue` and writes to `ToRadio`. It registers notification callbacks on `FromNum`/`FromRadio` and pushes received packets into the `ble_to_tcp_queue`.
+Because BLE operations (connecting, reading characteristics) can block, and we are using `ESPAsyncTCP` (which runs on Core 0), we separate concerns using FreeRTOS tasks and static queues:
+- **Core 0 (Network & MQTT Background)**:
+  - TCP Server (port 4403): Parses incoming TCP streams, creates frames, and pushes to `tcp_to_ble_queue`. Broadcasts outgoing frames from `ble_to_tcp_queue` to connected clients.
+  - MQTT Client (`esp-mqtt`): Receives downlink messages from broker, packs them into `ToRadio` protobufs, and pushes to `mqtt_to_ble_queue`.
+- **Core 1 (BLE Engine)**:
+  - Dedicated `bridgeBleTask`: Maintains the BLE connection, polls `FromRadio`, and routes uplink packets to `mqtt_net_handle_from_radio()` and `ble_to_tcp_queue`.
+  - **Dual-Queue Downlink Prioritization**: Checks high-priority `tcp_to_ble_queue` (app chat/commands) first, then drains normal-priority `mqtt_to_ble_queue` (background MQTT downlink) to write to `ToRadio`.
 
 ### 2. BLE Interaction Flow
 - **Connect**: Scan and connect to the configured BLE MAC address (`cfg.ble_mac`).
-- **Subscribe**: Register a notification callback on `FromNum`.
-- **Receive (BLE -> TCP)**: 
-  - When `FromNum` notifies, read the `FromRadio` characteristic.
-  - Prepend the `0x94 0xC3` length header to the bytes.
-  - Push the framed bytes to the `ble_to_tcp_queue`.
-  - The Network task pops the queue and sends to all active TCP clients.
-- **Transmit (TCP -> BLE)**:
-  - The Network task receives data, buffers it until a full frame (`header + payload`) is parsed.
-  - Pushes the payload (without header) to `tcp_to_ble_queue`.
-  - The BLE task pops the queue and calls `writeValue()` on the `ToRadio` characteristic.
+- **Subscribe**: Register notification callbacks on `FromNum` and `FromRadio`.
+- **Receive (BLE -> Network / MQTT)**: 
+  - When notified or on fast-poll, read `FromRadio`.
+  - Pass the raw bytes to `mqtt_net_handle_from_radio()`:
+    - If it contains `ModuleConfig.mqtt`, automatically syncs broker address, port, and credentials.
+    - If it contains `MqttClientProxyMessage`, publishes directly to the active MQTT broker and consumes the packet.
+  - If not consumed and active TCP clients exist, prepend `0x94 0xC3` framing and push to `ble_to_tcp_queue`.
+  - Core 0 network task broadcasts framed packet to all active TCP clients.
+- **Transmit (Network / MQTT -> BLE)**:
+  - High-priority TCP app frames are parsed, stripped of framing, and pushed to `tcp_to_ble_queue`.
+  - Background MQTT downlink packets are framed as `ToRadio` protobufs and pushed to `mqtt_to_ble_queue`.
+  - The BLE task on Core 1 pops the highest priority packet and calls `writeValue(..., false)` (Write Without Response) on `ToRadio`.
 
-### 3. Reconnection & Stability
-- Meshtastic nodes can take minutes to reboot. We need robust exponential backoff or periodic retry logic in the BLE task if the connection drops.
-- If the BLE connection is down, the TCP server should still accept clients but perhaps discard incoming packets or queue them temporarily.
-- MTU Negotiation: We must request an MTU of at least 512 bytes during the BLE connection phase, as Meshtastic packets can reach this size.
+### 3. Reconnection, Grace Period & Stability
+- **60-Second Disconnect Grace Period**: If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for 60 seconds and buffers incoming messages in `mqtt_to_ble_queue`. If BLE reconnects within 60s, the session is preserved with 0 dropped messages. If 60s elapses, the client is cleanly disconnected and the queue is cleared.
+- MTU Negotiation: We request an MTU of at least 512 bytes during the BLE connection phase to support maximum Meshtastic protobuf payloads.
 
-### 4. Memory Management & Caching
-- The Python project implemented "Config Caching" to speed up reconnections. Given the limited RAM on the ESP32 and the complexity of parsing the protobufs to extract node DBs, we will **skip caching** for the initial C++ version. The ESP32 will act as a pure, dumb, fast bridge.
-- **Zero Heap Fragmentation**: To guarantee extreme long-term stability, the bridge does not use dynamic memory (`malloc`/`free`) for packet routing. `BridgePacket` uses a statically sized `uint8_t data[512]` array, and TCP frames are built in stack memory (`uint8_t frame[516]`). This safely trades a fixed ~50KB of SRAM for total immunity to heap fragmentation.
+### 4. Memory Management (100% Static `.bss` Queues)
+- **Zero Heap Fragmentation**: All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, `mqtt_to_ble_queue`) are allocated statically in `.bss` via `xQueueCreateStatic`.
+- `BridgePacket` uses a fixed `uint8_t data[512]` array, and TCP frames use stack memory (`uint8_t frame[516]`), ensuring zero dynamic `malloc`/`free` calls in fast-path routing.
 
 ### 5. Client Limits & Auto-Discovery
 - **TCP Limits**: The bridge enforces a hard limit of `MAX_TCP_CLIENTS = 3`. Incoming TCP connections beyond this are instantly rejected to protect the ESP32's LwIP buffer memory and the massive 100-packet FreeRTOS queues.

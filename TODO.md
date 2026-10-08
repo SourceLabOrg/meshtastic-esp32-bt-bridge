@@ -12,10 +12,10 @@
 *   **Dynamic mDNS naming:** The bridge automatically sanitizes the saved Bluetooth name and broadcasts it dynamically (e.g. `DSC_AE25-bridge.local`), conforming strictly to RFC 1035 length and character limits.
 *   **Visual Status LED:** Added an asynchronous FreeRTOS LED task (`status_led.cpp`) mapping system states to blink patterns (Fast Blink: Boot, Slow Blink: AP Mode, Medium Blink: Bridge Searching, Solid On: Bridge Connected). Documented in `docs/user_guide.md`.
 *   **Optional Standalone MQTT Broker Gateway / Proxy:** Implemented autonomous MQTT client subsystem (`mqtt_net.cpp`, `mqtt_net.h`), Nanopb compilation pipeline (`generate_protos.py`), WebUI configuration card with live radio sync telemetry, Auto-Sync from radio `ModuleConfig.mqtt`, 3-Tier TLS security (embedded Mozilla Root CA bundle, custom CA upload, and insecure bypass), and bidirectional BLE-to-MQTT multiplexing. Detailed in [docs/feature-mqtt-proxy.md](file:///Users/spowis/Documents/code/meshtastic-esp32-bt-bridge/docs/feature-mqtt-proxy.md).
-
 *   **Distribution & Release Automation:** Built GitHub Actions CI/CD pipelines (`pr_check.yml`, `release.yml`) that automatically inject semver versions, compile multiple board profiles, and attach the binaries to GitHub Releases.
 *   **Web Flasher & GitHub Pages:** Built a zero-install Web Flasher (`web/index.html`) using ESP Web Tools, and an automated GitHub Actions pipeline (`pages.yml`) to deploy it dynamically to GitHub Pages upon every new release.
 *   **Documentation:** Authored comprehensive `README.md` and detailed architectural markdown files.
+*   **Static FreeRTOS Queue Migration:** Migrated all inter-task FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, `mqtt_to_ble_queue`) to `xQueueCreateStatic` with pre-allocated `.bss` buffers for 100% compile-time deterministic memory allocation and zero runtime heap fragmentation.
 
 ## Hardware Profiles Supported
 *   **Seeed XIAO ESP32-S3** (`seeed_xiao_esp32s3`): Native USB, Active Low LED.
@@ -23,5 +23,6 @@
 *   **Generic ESP32-S3 DevKit** (`esp32-s3-devkitc-1`): Standard S3 devkit. Native USB.
 
 ## Outstanding Features & Future Roadmap
-*   **Static FreeRTOS Queue Migration:** Migrate `tcp_to_ble_queue` and `ble_to_tcp_queue` in `src/bridge.cpp` from `xQueueCreate` to `xQueueCreateStatic` with pre-allocated `.bss` buffers (matching `mqtt_to_ble_queue`) for unified compile-time deterministic memory allocation.
 *   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
+*   periodically poll queue sizes and log when reaches a high water mark (IE queue X is 75% full) (maybe even expose via webui)
+*   DRY out notifyFromRadio() and bridgeBleTask()  in bridge.cpp?
