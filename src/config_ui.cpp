@@ -823,7 +823,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     window.onload = function() {
       document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
       loadConfig();
-      setInterval(updateMqttStatus, 3000);
+      setInterval(updateMqttStatus, 6000);
     };
   </script>
 </body>
@@ -844,13 +844,13 @@ BridgeConfig config_ui_load() {
     BridgeConfig cfg;
 
     // Wifi settings
-    cfg.wifi_ssid = preferences.getString("wifi_ssid", "");
-    cfg.wifi_pass = preferences.getString("wifi_pass", "");
+    cfg.wifi_ssid = preferences.isKey("wifi_ssid") ? preferences.getString("wifi_ssid", "") : "";
+    cfg.wifi_pass = preferences.isKey("wifi_pass") ? preferences.getString("wifi_pass", "") : "";
 
     // Bluetooth settings
-    cfg.ble_name = preferences.getString("ble_name", "");
-    cfg.ble_mac = preferences.getString("ble_mac", "");
-    cfg.ble_pin = preferences.getString("ble_pin", "");
+    cfg.ble_name = preferences.isKey("ble_name") ? preferences.getString("ble_name", "") : "";
+    cfg.ble_mac = preferences.isKey("ble_mac") ? preferences.getString("ble_mac", "") : "";
+    cfg.ble_pin = preferences.isKey("ble_pin") ? preferences.getString("ble_pin", "") : "";
 
     // System settings
     cfg.debug_logs = preferences.getBool("debug_logs", false);
@@ -858,7 +858,7 @@ BridgeConfig config_ui_load() {
     // MQTT preferences
     cfg.mqtt_enabled = preferences.getBool("mqtt_enabled", false);
     cfg.mqtt_tls_insecure = preferences.getBool("mqtt_tls_insec", false);
-    cfg.mqtt_custom_ca = preferences.getString("mqtt_custom_ca", "");
+    cfg.mqtt_custom_ca = preferences.isKey("mqtt_custom_ca") ? preferences.getString("mqtt_custom_ca", "") : "";
     return cfg;
 }
 
@@ -866,13 +866,15 @@ BridgeConfig config_ui_load() {
  * Start the UI Captive Portal Server.
  */
 void config_ui_start_server() {
-    // Serve the main HTML page with explicit UTF-8 charset
+    // Serve the main HTML page directly from PROGMEM flash avoiding heap copy.
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send(200, "text/html; charset=utf-8", index_html);
+        log_d("[WebUI] GET / requested (Client: %s)", request->client()->remoteIP().toString().c_str());
+        request->send(200, "text/html; charset=utf-8", (const uint8_t*)index_html, sizeof(index_html) - 1);
     });
 
     // Fetch current configuration JSON
     server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /config requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         BridgeConfig cfg = config_ui_load();
         String json = "{";
         json += "\"wifi_ssid\":\"" + utils_escape_json(cfg.wifi_ssid) + "\",";
@@ -890,11 +892,13 @@ void config_ui_start_server() {
 
     // Fetch MQTT live status
     server.on("/mqtt_status", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /mqtt_status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         request->send(200, "application/json", mqtt_net_get_status_json());
     });
 
     // Save MQTT configuration
     server.on("/save_mqtt", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /save_mqtt requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         bool enabled = request->hasParam("mqtt_enabled", true) && (request->getParam("mqtt_enabled", true)->value() == "true");
         bool tlsInsecureVal = request->hasParam("mqtt_tls_insecure", true) && (request->getParam("mqtt_tls_insecure", true)->value() == "true");
         String customCaVal = request->hasParam("mqtt_custom_ca", true) ? request->getParam("mqtt_custom_ca", true)->value() : "";
@@ -924,12 +928,14 @@ void config_ui_start_server() {
 
     // Trigger the WiFi scan asynchronously
     server.on("/start_scan_wifi", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /start_scan_wifi requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         wifi_net_start_scan();
         request->send(200, "application/json", "{\"status\": \"started\"}");
     });
 
     // Poll for WiFi scan results
     server.on("/scan_wifi_results", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /scan_wifi_results requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (wifi_net_is_scanning()) {
             request->send(200, "application/json", "{\"status\": \"scanning\"}");
         } else {
@@ -940,12 +946,14 @@ void config_ui_start_server() {
 
     // Trigger the BLE scan asynchronously
     server.on("/start_scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /start_scan requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         ble_client_start_scan();
         request->send(200, "application/json", "{\"status\": \"started\"}");
     });
 
     // Poll for BLE scan results
     server.on("/scan_results", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /scan_results requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (ble_client_is_scanning()) {
             request->send(200, "application/json", "{\"status\": \"scanning\"}");
         } else {
@@ -956,6 +964,7 @@ void config_ui_start_server() {
 
     // Start async Bluetooth Connection Test
     server.on("/start_test_ble", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /start_test_ble requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (request->hasParam("ble_mac", true) && request->hasParam("ble_pin", true)) {
             String mac = request->getParam("ble_mac", true)->value();
             String pin = request->getParam("ble_pin", true)->value();
@@ -969,6 +978,7 @@ void config_ui_start_server() {
 
     // Poll Bluetooth Connection Test Status
     server.on("/test_ble_status", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /test_ble_status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (ble_client_is_testing()) {
             request->send(200, "application/json", "{\"status\":\"testing\"}");
         } else {
@@ -987,6 +997,7 @@ void config_ui_start_server() {
 
     // Save WiFi configuration
     server.on("/save_wifi", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /save_wifi requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (request->hasParam("ssid", true)) {
             String ssid = request->getParam("ssid", true)->value();
             preferences.putString("wifi_ssid", ssid);
@@ -1004,6 +1015,7 @@ void config_ui_start_server() {
 
     // Save Bluetooth configuration
     server.on("/save_ble", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /save_ble requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (request->hasParam("ble_mac", true) && request->hasParam("ble_pin", true)) {
             String mac = request->getParam("ble_mac", true)->value();
             String pin = request->getParam("ble_pin", true)->value();
@@ -1019,6 +1031,7 @@ void config_ui_start_server() {
 
     // Save System configuration
     server.on("/save_system", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /save_system requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         if (request->hasParam("debug_logs", true)) {
             String val = request->getParam("debug_logs", true)->value();
             bool enableDebug = (val == "true");
@@ -1036,6 +1049,7 @@ void config_ui_start_server() {
 
     // Reboot system
     server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /reboot requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting bridge...\"}");
         delay(1000);
         ESP.restart();
@@ -1043,6 +1057,7 @@ void config_ui_start_server() {
 
     // Reset all settings and reboot
     server.on("/reset", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /reset requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         preferences.clear();
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Settings erased. Rebooting...\"}");
         delay(1000);
@@ -1051,7 +1066,17 @@ void config_ui_start_server() {
 
     // Fallback for captive portal redirection
     server.onNotFound([](AsyncWebServerRequest *request){
-        request->redirect("/");
+        if (request->url().endsWith(".ico") || request->url().endsWith(".png")) {
+            request->send(404);
+            return;
+        }
+        if (wifi_net_is_ap_mode()) {
+            log_d("[WebUI] AP Captive portal redirect for '%s' -> /", request->url().c_str());
+            request->redirect("/");
+        } else {
+            log_d("[WebUI] 404 Not Found for '%s'", request->url().c_str());
+            request->send(404, "text/plain", "Not Found");
+        }
     });
 
     server.begin();

@@ -88,7 +88,7 @@
 
 // Size of message queues between BLE <--> TCP Connections.
 #ifndef BRIDGE_QUEUE_SIZE
-#define BRIDGE_QUEUE_SIZE 100
+#define BRIDGE_QUEUE_SIZE 32
 #endif
 
 // -----------------------------------------
@@ -96,7 +96,7 @@
 // -----------------------------------------
 // Capacity of static MQTT downlink packet buffer queue.
 #ifndef MQTT_QUEUE_SIZE
-#define MQTT_QUEUE_SIZE 40
+#define MQTT_QUEUE_SIZE 16
 #endif
 
 // Duration (in seconds) to keep MQTT broker connected during transient Bluetooth drops.

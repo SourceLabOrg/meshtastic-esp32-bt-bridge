@@ -172,6 +172,7 @@ bool wifi_net_connect_sta(const String& ssid, const String& pass) {
     log_i("[WIFI] Connecting to WiFi: %s", ssid.c_str());
 
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
     WiFi.begin(ssid.c_str(), pass.c_str());
 
     // Wait up to 10 seconds for connection (20 * 500 ms delay)

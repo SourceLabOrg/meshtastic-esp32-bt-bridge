@@ -101,19 +101,24 @@ static inline void mqtt_net_reset_grace_timer() {
     s_ble_disconnected_at.store(0, std::memory_order_relaxed);
 }
 
-// RAII Lock Guard for deterministic recursive mutex ownership
+/**
+ * RAII Lock Guard for deterministic recursive mutex ownership with optional timeout
+ */
 class MqttLockGuard {
 public:
-    MqttLockGuard() {
+    MqttLockGuard(TickType_t timeout = portMAX_DELAY) {
         if (mqttMutex) {
-            xSemaphoreTakeRecursive(mqttMutex, portMAX_DELAY);
+            acquired = (xSemaphoreTakeRecursive(mqttMutex, timeout) == pdTRUE);
         }
     }
     ~MqttLockGuard() {
-        if (mqttMutex) {
+        if (mqttMutex && acquired) {
             xSemaphoreGiveRecursive(mqttMutex);
         }
     }
+    bool is_locked() const { return acquired; }
+private:
+    bool acquired = false;
 };
 
 /**
@@ -304,104 +309,117 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
 
 /**
  * Safely stops and destroys the active ESP-IDF MQTT client handle.
- * Assumes caller holds mqttMutex / MqttLockGuard.
  */
 static void mqtt_net_destroy_client() {
-    if (mqttClient) {
+    esp_mqtt_client_handle_t clientToDestroy = NULL;
+    {
+        MqttLockGuard lock;
+        if (mqttClient) {
+            clientToDestroy = mqttClient;
+            mqttClient = NULL;
+        }
+    }
+    if (clientToDestroy) {
         log_i("[MQTT] Stopping and destroying MQTT client...");
-        esp_mqtt_client_stop(mqttClient);
-        esp_mqtt_client_destroy(mqttClient);
-        mqttClient = NULL;
+        esp_mqtt_client_stop(clientToDestroy);
+        esp_mqtt_client_destroy(clientToDestroy);
     }
 }
 
-// Self-locking client starter
+// Client starter (releases lock before starting MQTT task to prevent deadlocks)
 static void mqtt_net_start_client(const String& server, uint16_t port, const String& user, const String& pass, bool tls, bool tls_insecure, const String& custom_ca) {
-    MqttLockGuard lock;
-
-    /**
-     * If we already have a client... we should destroy it first...
-     */
-    if (mqttClient) {
-        mqtt_net_destroy_client();
-    }
-
-    // Sanity check config.
-    if (server.isEmpty()) {
-        log_e("[MQTT] No broker address is configured on radio, cannot start.");
-        mqtt_net_set_state(MQTT_STATE_ERROR, "No broker address configured on radio");
-        return;
-    }
-
-    // Copy detail into the current status entry
-    currentStatus.active_server = server;
-    currentStatus.active_port = port;
-    currentStatus.active_tls = tls;
-    currentStatus.active_root = currentStatus.radio_root.isEmpty() ? "msh" : currentStatus.radio_root;
-
-    // Track active session for seamless reconnect comparison
-    currentSession.server = server;
-    currentSession.port = port;
-    currentSession.user = user;
-    currentSession.pass = pass;
-    currentSession.root = currentStatus.active_root;
-    currentSession.tls = tls;
-    currentSession.tls_insecure = tls_insecure;
-    currentSession.custom_ca = custom_ca;
-    currentSession.is_active = true;
-
-    // Reset the disconnect grace timer on connect.
-    mqtt_net_reset_grace_timer();
-
-    // Update state to connecting...
-    mqtt_net_set_state(MQTT_STATE_CONNECTING);
-
-    // Build out the underlying mqtt client
     esp_mqtt_client_config_t mqtt_cfg = {};
-    mqtt_cfg.host = server.c_str();
-    mqtt_cfg.port = port;
-    if (!user.isEmpty()) {
-        mqtt_cfg.username = user.c_str();
-    }
-    if (!pass.isEmpty()) {
-        mqtt_cfg.password = pass.c_str();
-    }
-    mqtt_cfg.transport = tls ? MQTT_TRANSPORT_OVER_SSL : MQTT_TRANSPORT_OVER_TCP;
+    esp_mqtt_client_handle_t newClient = NULL;
+    {
+        MqttLockGuard lock;
 
-    // 3-Tier TLS Security Configuration
-    if (tls) {
-        if (tls_insecure) {
-            // Tier 3: Insecure bypass (self-signed, local IP, or CN mismatch)
-            mqtt_cfg.crt_bundle_attach = mqtt_tls_insecure_attach;
-            mqtt_cfg.skip_cert_common_name_check = true;
-        } else if (!custom_ca.isEmpty()) {
-            // Tier 2: Custom / Private Root CA or Server Certificate PEM
-            mqtt_cfg.cert_pem = custom_ca.c_str();
-            mqtt_cfg.crt_bundle_attach = NULL;
-        } else {
-            // Tier 1: Embedded Mozilla Root CA Bundle (Let's Encrypt, DigiCert, etc.)
-            mqtt_cfg.crt_bundle_attach = arduino_esp_crt_bundle_attach;
+        /**
+         * If we already have a client... destroy it first...
+         */
+        if (mqttClient) {
+            mqtt_net_destroy_client();
         }
-    }
 
-    mqtt_cfg.buffer_size = MQTT_CLIENT_BUFFER_SIZE;
-    mqtt_cfg.out_buffer_size = MQTT_CLIENT_BUFFER_SIZE;
-    mqtt_cfg.keepalive = MQTT_CLIENT_KEEPALIVE_SECONDS;
-    mqtt_cfg.reconnect_timeout_ms = MQTT_RECONNECT_TIME_MS;
-    mqtt_cfg.event_handle = mqtt_event_handler;
+        // Sanity check config.
+        if (server.isEmpty()) {
+            log_e("[MQTT] No broker address is configured on radio, cannot start.");
+            mqtt_net_set_state(MQTT_STATE_ERROR, "No broker address configured on radio");
+            return;
+        }
 
-    log_i(
-        "[MQTT] Starting client -> %s:%u (TLS: %s, Insecure: %s, Custom CA: %s)",
-        server.c_str(),
-        port,
-        tls ? "Yes" : "No",
-        tls_insecure ? "Yes" : "No",
-        custom_ca.isEmpty() ? "No" : "Yes"
-    );
+        // Copy detail into the current status entry
+        currentStatus.active_server = server;
+        currentStatus.active_port = port;
+        currentStatus.active_tls = tls;
+        currentStatus.active_root = currentStatus.radio_root.isEmpty() ? "msh" : currentStatus.radio_root;
 
-    mqttClient = esp_mqtt_client_init(&mqtt_cfg);
-    if (mqttClient) {
-        esp_err_t err = esp_mqtt_client_start(mqttClient);
+        // Track active session for seamless reconnect comparison
+        currentSession.server = server;
+        currentSession.port = port;
+        currentSession.user = user;
+        currentSession.pass = pass;
+        currentSession.root = currentStatus.active_root;
+        currentSession.tls = tls;
+        currentSession.tls_insecure = tls_insecure;
+        currentSession.custom_ca = custom_ca;
+        currentSession.is_active = true;
+
+        // Reset the disconnect grace timer on connect.
+        mqtt_net_reset_grace_timer();
+
+        // Update state to connecting...
+        mqtt_net_set_state(MQTT_STATE_CONNECTING);
+
+        // Build out the underlying mqtt client
+        mqtt_cfg.host = server.c_str();
+        mqtt_cfg.port = port;
+        if (!user.isEmpty()) {
+            mqtt_cfg.username = user.c_str();
+        }
+        if (!pass.isEmpty()) {
+            mqtt_cfg.password = pass.c_str();
+        }
+        mqtt_cfg.transport = tls ? MQTT_TRANSPORT_OVER_SSL : MQTT_TRANSPORT_OVER_TCP;
+
+        // 3-Tier TLS Security Configuration
+        if (tls) {
+            if (tls_insecure) {
+                // Tier 3: Insecure bypass (self-signed, local IP, or CN mismatch)
+                mqtt_cfg.crt_bundle_attach = mqtt_tls_insecure_attach;
+                mqtt_cfg.skip_cert_common_name_check = true;
+            } else if (!custom_ca.isEmpty()) {
+                // Tier 2: Custom / Private Root CA or Server Certificate PEM
+                mqtt_cfg.cert_pem = custom_ca.c_str();
+                mqtt_cfg.crt_bundle_attach = NULL;
+            } else {
+                // Tier 1: Embedded Mozilla Root CA Bundle (Let's Encrypt, DigiCert, etc.)
+                mqtt_cfg.crt_bundle_attach = arduino_esp_crt_bundle_attach;
+            }
+        }
+
+        mqtt_cfg.buffer_size = MQTT_CLIENT_BUFFER_SIZE;
+        mqtt_cfg.out_buffer_size = MQTT_CLIENT_BUFFER_SIZE;
+        mqtt_cfg.keepalive = MQTT_CLIENT_KEEPALIVE_SECONDS;
+        mqtt_cfg.reconnect_timeout_ms = MQTT_RECONNECT_TIME_MS;
+        mqtt_cfg.task_prio = 2; // Keep below AsyncTCP (3) and LwIP (18) so WebUI and network sockets are never starved
+        mqtt_cfg.task_stack = 8192; // 8KB stack for Nanopb encode/decode and TLS handshake safety
+        mqtt_cfg.event_handle = mqtt_event_handler;
+
+        log_i(
+            "[MQTT] Starting client -> %s:%u (TLS: %s, Insecure: %s, Custom CA: %s)",
+            server.c_str(),
+            port,
+            tls ? "Yes" : "No",
+            tls_insecure ? "Yes" : "No",
+            custom_ca.isEmpty() ? "No" : "Yes"
+        );
+
+        newClient = esp_mqtt_client_init(&mqtt_cfg);
+        mqttClient = newClient;
+    } // Lock is safely released HERE before esp_mqtt_client_start!
+
+    if (newClient) {
+        esp_err_t err = esp_mqtt_client_start(newClient);
         if (err != ESP_OK) {
             log_e("[MQTT] Failed to start MQTT client (error %d)", err);
             mqtt_net_set_state(MQTT_STATE_ERROR, "Failed to start client");
@@ -413,40 +431,48 @@ static void mqtt_net_start_client(const String& server, uint16_t port, const Str
 }
 
 /**
- * Self-locking client stopper.
- * Stops and destroys the connected client,
- * updates all relevant state.
+ * Stops and destroys the connected client and updates all relevant state.
  */
 static void mqtt_net_stop_client() {
-    MqttLockGuard lock;
+    {
+        MqttLockGuard lock;
+        currentSession.is_active = false;
+        mqtt_net_reset_grace_timer();
+        mqtt_net_set_state(MQTT_STATE_DISABLED);
+    }
     mqtt_net_destroy_client();
-    currentSession.is_active = false;
-    mqtt_net_reset_grace_timer();
-    mqtt_net_set_state(MQTT_STATE_DISABLED);
 }
 
 // Starts or restarts the MQTT client using the active synced radio configuration
 static void mqtt_net_start_synced_client() {
-    MqttLockGuard lock;
-    if (!currentConfig.enabled) {
-        log_i("[MQTT] Refusing to start MQTT client, MQTT Gateway feature is disabled.");
-        return;
+    String server;
+    uint16_t port = 1883;
+    String user = "";
+    String pass = "";
+    bool tls = false;
+    bool tls_insec = false;
+    String custom_ca = "";
+
+    {
+        MqttLockGuard lock;
+        if (!currentConfig.enabled) {
+            log_i("[MQTT] Refusing to start MQTT client, MQTT Gateway feature is disabled.");
+            return;
+        }
+        if (!currentStatus.radio_proxy_enabled) {
+            log_i("[MQTT] Refusing to start MQTT client, MQTT Proxy is disabled on radio.");
+            return;
+        }
+        server = currentStatus.radio_server.isEmpty() ? "mqtt.meshtastic.org" : currentStatus.radio_server;
+        port = currentStatus.radio_port;
+        user = currentStatus.radio_user;
+        pass = radioPassword;
+        tls = currentStatus.radio_tls;
+        tls_insec = currentConfig.tls_insecure;
+        custom_ca = currentConfig.custom_ca;
     }
-    if (!currentStatus.radio_proxy_enabled) {
-        log_i("[MQTT] Refusing to start MQTT client, MQTT Proxy is disabled on radio.");
-        return;
-    }
-    String server = currentStatus.radio_server.isEmpty() ? "mqtt.meshtastic.org" : currentStatus.radio_server;
-    currentStatus.active_root = currentStatus.radio_root.isEmpty() ? "msh" : currentStatus.radio_root;
-    mqtt_net_start_client(
-        server,
-        currentStatus.radio_port,
-        currentStatus.radio_user,
-        radioPassword,
-        currentStatus.radio_tls,
-        currentConfig.tls_insecure,
-        currentConfig.custom_ca
-    );
+
+    mqtt_net_start_client(server, port, user, pass, tls, tls_insec, custom_ca);
 }
 
 void mqtt_net_init() {
@@ -739,8 +765,13 @@ bool mqtt_net_handle_from_radio(const uint8_t* data, size_t len) {
 }
 
 MqttStatus mqtt_net_get_status() {
-    MqttLockGuard lock;
-    MqttStatus st = currentStatus;
+    MqttStatus st;
+    {
+        MqttLockGuard lock(pdMS_TO_TICKS(100));
+        if (lock.is_locked()) {
+            st = currentStatus;
+        }
+    }
     st.msgs_published = s_msgs_published.load(std::memory_order_relaxed);
     st.msgs_received = s_msgs_received.load(std::memory_order_relaxed);
     return st;
