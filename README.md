@@ -21,7 +21,7 @@ You will need a supported ESP32 microcontroller board.
 
 **Highly Recommended:**
 *   **[Seeed Studio XIAO ESP32-S3](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html)**: This is the officially recommended board for this project. It is incredibly tiny, has native USB support, and features a powerful antenna.
-    *   *Optional:* You can **[3D print this excellent case](https://www.printables.com/model/1445678-case-for-seeed-xiao-esp32s3-and-the-default-antenn/files)** designed specifically to hold the board and its default antenna!
+    *   *Optional:* You can **[3D print this case](https://www.printables.com/model/1445678-case-for-seeed-xiao-esp32s3-and-the-default-antenn/files)** designed specifically to hold the board and its default antenna!
 
 **Other Supported Hardware:**
 *   **Generic ESP32-S3 DevKit:** Any standard ESP32-S3 development board with native USB.
@@ -64,14 +64,20 @@ Once the bridge is running with a solid LED, it is entirely transparent!
 
 > **Note:** The bridge supports multiplexing, meaning **up to 3 clients** (e.g., your phone, your tablet, and your desktop) can all connect to the radio simultaneously over WiFi!
 
-### Standalone MQTT Gateway & Proxy (Optional)
+### MQTT Gateway / Proxy (Optional)
 
-In addition to serving local TCP app clients, the bridge can act as an **autonomous MQTT Gateway** for your Bluetooth radio:
+In addition to serving local TCP app clients, the bridge can act as an independent **MQTT Gateway/Proxy** for your Bluetooth Meshtastic device.
 
-* **Auto-Sync from Radio:** When MQTT is enabled on your radio (**MQTT Enabled** and **Proxy to Client Enabled** in the Meshtastic app), the bridge automatically discovers your broker address, port, credentials, root topic (`msh`, `ptp`, etc.), and TLS configuration over Bluetooth and establishes the connection.
-* **3-Tier TLS Security:** Supports public brokers (via an embedded Mozilla Root CA bundle for Let's Encrypt / DigiCert), custom/private CA certificates (uploadable via Web UI), or self-signed insecure mode.
-* **Dual-Queue Prioritization:** Prioritizes local app chats and commands while streaming background MQTT downlink packets to the radio.
-* **Disconnect Grace Period:** If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for up to 60 seconds and buffers incoming messages without losing your session.
+If the MQTT Gateway feature is enabled and MQTT is enabled on your radio (**MQTT Enabled** and **Proxy to Client Enabled** in the Meshtastic app), 
+the bridge automatically discovers your broker address, port, credentials, root topic (`msh/US`, `msh/JP`, etc.), and TLS configuration over 
+Bluetooth and establishes the connection.  It will then proxy MQTT messages between its MQTT client connection and your radio using
+your WiFi connection.
+
+To prevent duplicate messages, the bridge automatically filters out MQTT packets from reaching your TCP clients to prevent sending
+duplicate messages to the MQTT server.
+
+**Disconnect Grace Period:** If the Bluetooth connection drops momentarily, the bridge keeps the MQTT broker connection alive for up 
+to 60 seconds and buffers incoming messages to avoid losing messages.
 
 ### Re-configuring the Bridge
 
