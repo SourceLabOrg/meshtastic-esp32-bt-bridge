@@ -61,6 +61,7 @@ meshtastic-esp32-bt-bridge/
 │   └── cert/              # Embedded Mozilla Root CA binary bundle (x509_crt_bundle.bin)
 ├── docs/                  # Additional documentation
 │   ├── architecture.md    # System architecture
+│   ├── ble_task_optimizations.md # BLE task performance & optimization guide
 │   ├── bridge_architecture.md # Network & Bridge details
 │   ├── configuration_ui.md# Captive portal design
 │   ├── development.md     # Build guide, queue sizing & release instructions
