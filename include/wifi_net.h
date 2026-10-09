@@ -10,7 +10,7 @@ void wifi_net_start_mdns(const BridgeConfig& cfg);
  * @return Active advertised mDNS hostname (e.g. "mesh-af28.local") or empty if not active.
  * Thread-safe: written once during boot before the webserver starts serving requests.
  */
-String wifi_net_get_mdns_host();
+const String& wifi_net_get_mdns_host();
 
 void wifi_net_start_ap();
 bool wifi_net_is_ap_mode();

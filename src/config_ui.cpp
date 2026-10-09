@@ -1220,7 +1220,7 @@ void config_ui_start_server() {
         bool isAp = wifi_net_is_ap_mode();
         String ipStr = isAp ? WiFi.softAPIP().toString() : (wifiConnected ? WiFi.localIP().toString() : "0.0.0.0");
         int8_t rssi = wifiConnected ? WiFi.RSSI() : 0;
-        String mdnsHost = wifi_net_get_mdns_host();
+        const String& mdnsHost = wifi_net_get_mdns_host();
 
         // Construct response JSON with zero intermediate heap allocations into a single pre-reserved buffer
         String json;
