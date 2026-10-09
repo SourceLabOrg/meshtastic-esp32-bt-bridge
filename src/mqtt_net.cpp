@@ -67,8 +67,8 @@ struct ActiveBrokerSession {
 static MqttConfig currentConfig;
 
 /**
- * MqttStatus contains the live telemetry properties (radio_server, radio_user, radio_root, active_server, etc.) that
- * are serialized to JSON by mqtt_net_get_status_json() and sent to the browser via /mqtt_status.
+ * MqttStatus contains the live telemetry properties (radio_server, radio_user, radio_root, active_server, etc.)
+ * queried for /status.
  */
 static MqttStatus currentStatus;
 
@@ -784,27 +784,4 @@ MqttStatus mqtt_net_get_status() {
     st.msgs_received = s_msgs_received.load(std::memory_order_relaxed);
     st.msgs_dropped = s_msgs_dropped.load(std::memory_order_relaxed);
     return st;
-}
-
-String mqtt_net_get_status_json() {
-    MqttStatus st = mqtt_net_get_status();
-    String json = "{";
-    json += "\"gateway_enabled\":" + String(mqtt_net_is_enabled() ? "true" : "false") + ",";
-    json += "\"state\":\"" + st.state_str + "\",";
-    json += "\"radio_proxy_enabled\":" + String(st.radio_proxy_enabled ? "true" : "false") + ",";
-    json += "\"radio_server\":\"" + utils_escape_json(st.radio_server) + "\",";
-    json += "\"radio_port\":" + String(st.radio_port) + ",";
-    json += "\"radio_tls\":" + String(st.radio_tls ? "true" : "false") + ",";
-    json += "\"radio_user\":\"" + utils_escape_json(st.radio_user) + "\",";
-    json += "\"radio_root\":\"" + utils_escape_json(st.radio_root) + "\",";
-    json += "\"active_server\":\"" + utils_escape_json(st.active_server) + "\",";
-    json += "\"active_port\":" + String(st.active_port) + ",";
-    json += "\"active_root\":\"" + utils_escape_json(st.active_root) + "\",";
-    json += "\"active_tls\":" + String(st.active_tls ? "true" : "false") + ",";
-    json += "\"published\":" + String(st.msgs_published) + ",";
-    json += "\"received\":" + String(st.msgs_received) + ",";
-    json += "\"dropped\":" + String(st.msgs_dropped) + ",";
-    json += "\"last_error\":\"" + utils_escape_json(st.last_error) + "\"";
-    json += "}";
-    return json;
 }

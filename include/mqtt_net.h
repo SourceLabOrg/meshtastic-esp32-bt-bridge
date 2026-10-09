@@ -118,4 +118,3 @@ bool mqtt_net_publish(const char* topic, const uint8_t* payload, size_t len, boo
  * Get current MQTT status and telemetry
  */
 MqttStatus mqtt_net_get_status();
-String mqtt_net_get_status_json();
