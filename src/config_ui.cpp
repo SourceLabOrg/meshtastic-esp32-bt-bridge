@@ -343,6 +343,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function toggleEditMqtt(edit) {
+      // Reset inputs
+      if (edit && currentConfig) {
+        document.getElementById('input-mqtt-enabled').checked = !!currentConfig.mqtt_enabled;
+        document.getElementById('input-mqtt-tls-insecure').checked = !!currentConfig.mqtt_tls_insecure;
+        document.getElementById('input-mqtt-ca').value = currentConfig.mqtt_custom_ca || '';
+      }
       document.getElementById('mqtt-view').style.display = edit ? 'none' : 'block';
       document.getElementById('mqtt-edit').style.display = edit ? 'block' : 'none';
       document.getElementById('btn-edit-mqtt').style.display = edit ? 'none' : 'block';
@@ -451,6 +457,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function toggleEditWifi(edit) {
+      // Copy current config values back into inputs.
+      if (edit && currentConfig) {
+        document.getElementById('input-wifi-ssid').value = currentConfig.wifi_ssid || '';
+        document.getElementById('input-wifi-pass').value = '';
+      }
+
       document.getElementById('wifi-view').style.display = edit ? 'none' : 'block';
       document.getElementById('wifi-edit').style.display = edit ? 'block' : 'none';
       document.getElementById('btn-edit-wifi').style.display = edit ? 'none' : 'block';
@@ -547,6 +559,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function toggleEditBle(edit) {
+      // Copy current config values back into inputs.
+      if (edit && currentConfig) {
+        document.getElementById('input-ble-name').value = currentConfig.ble_name || '';
+        document.getElementById('input-ble-mac').value = currentConfig.ble_mac || '';
+        document.getElementById('input-ble-pin').value = currentConfig.ble_pin || '';
+      }
+
       document.getElementById('ble-view').style.display = edit ? 'none' : 'block';
       document.getElementById('ble-edit').style.display = edit ? 'block' : 'none';
       document.getElementById('btn-edit-ble').style.display = edit ? 'none' : 'block';
