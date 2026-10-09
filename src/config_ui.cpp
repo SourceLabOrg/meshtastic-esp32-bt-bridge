@@ -331,7 +331,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     <div class="section-divider">Settings & Controls</div>
     <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin: 10px 0 12px;">
-      <label for="sys-live-polling" style="margin-bottom:0;">Live Telemetry Polling (7s)</label>
+      <label for="sys-live-polling" style="margin-bottom:0;">Live Telemetry Polling (<span id="sys-poll-rate">7s</span>)</label>
       <input type="checkbox" id="sys-live-polling" checked onchange="toggleLivePolling()" style="width:20px; height:20px; margin:0;">
     </div>
     <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
@@ -416,17 +416,30 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     }
 
+    const pollIntervals = [7000, 3000, 1000];
+    let pollIntervalIdx = 0;
     let statusPollTimer = null;
+    let statusFetchInFlight = false;
 
-    function toggleLivePolling() {
-      const enabled = document.getElementById('sys-live-polling').checked;
+    function scheduleNextStatusPoll() {
       if (statusPollTimer) {
-        clearInterval(statusPollTimer);
+        clearTimeout(statusPollTimer);
         statusPollTimer = null;
       }
+      const enabled = document.getElementById('sys-live-polling').checked;
+      if (enabled) {
+        statusPollTimer = setTimeout(updateStatus, pollIntervals[pollIntervalIdx]);
+      }
+    }
+
+    function toggleLivePolling() {
+      if (statusPollTimer) {
+        clearTimeout(statusPollTimer);
+        statusPollTimer = null;
+      }
+      const enabled = document.getElementById('sys-live-polling').checked;
       if (enabled) {
         updateStatus();
-        statusPollTimer = setInterval(updateStatus, 7000);
       }
     }
 
@@ -529,6 +542,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function updateStatus() {
+      if (statusFetchInFlight) return;
+      statusFetchInFlight = true;
+
       fetch('/status')
         .then(r => r.json())
         .then(st => {
@@ -655,7 +671,11 @@ const char index_html[] PROGMEM = R"rawliteral(
             }
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          statusFetchInFlight = false;
+          scheduleNextStatusPoll();
+        });
     }
 
     function toggleEditWifi(edit) {
@@ -1104,11 +1124,28 @@ const char index_html[] PROGMEM = R"rawliteral(
       );
     }
 
+    document.addEventListener('keydown', function(e) {
+      if (e.key && e.key.toLowerCase() === 'p') {
+        const active = document.activeElement;
+        if (active && ((active.tagName === 'INPUT' && active.type !== 'checkbox') || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+          return;
+        }
+        pollIntervalIdx = (pollIntervalIdx + 1) % pollIntervals.length;
+        const rateSec = pollIntervals[pollIntervalIdx] / 1000;
+        const rateEl = document.getElementById('sys-poll-rate');
+        if (rateEl) rateEl.innerText = rateSec + 's';
+        if (statusPollTimer) {
+          clearTimeout(statusPollTimer);
+          statusPollTimer = null;
+        }
+        updateStatus();
+      }
+    });
+
     window.onload = function() {
       document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
       loadConfig();
       updateStatus();
-      statusPollTimer = setInterval(updateStatus, 7000);
     };
   </script>
 </body>
