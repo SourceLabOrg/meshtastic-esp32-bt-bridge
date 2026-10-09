@@ -9,7 +9,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 
 ### 1. Modular Card Design
 * **WiFi Network Card:**
-  * Displays the current configured SSID and masked password status, active IP address, advertised mDNS hostname (e.g. `mesh-ae28.local`), and live WiFi RSSI signal strength with quality indicator.
+  * Displays the current configured SSID, masked password status, live WiFi connection status pill (`Connected` / `AP Mode` / `Disconnected` / `Not Configured`), active IP address, advertised mDNS hostname (e.g. `dsc-ae28.local`), and live WiFi RSSI signal strength with colored quality pill (`Excellent` / `Good` / `Fair` / `Weak`).
   * In Edit mode, offers a live scan dropdown of nearby WiFi networks (with RSSI signal levels and lock/open security indicators), manual SSID entry for hidden networks, and Password input with a **Show/Hide** toggle.
   * Features a **🔍 Scan for Networks** button (with scan in progress indicator and scan/save buttons disabled during scans).
   * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
@@ -19,7 +19,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
   * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
 * **MQTT Gateway Card:**
-  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, and published/received/dropped telemetry packet counters.
+  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, Client Status pill, and published/received telemetry packet counters.
   * In Edit mode, offers:
     * **Enable MQTT Gateway** toggle.
     * **Skip Certificate Validation** toggle (for self-signed / local LAN brokers).
@@ -27,7 +27,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Independent **Save MQTT Settings** button persists settings to NVS and applies them immediately.
 * **System Actions Card:**
   * Displays formatted **System Uptime** (e.g. `1h 24m 12s`).
-  * Displays active **TCP Clients** (`X / 3 active`).
+  * Displays active **TCP Clients** (`X / 3`).
   * Displays **Memory (Heap)** stats: Free Heap, Minimum Recorded Free Heap, and Maximum Allocatable Block in KB.
   * Displays **Free Task Stacks** high-water mark headroom for `bridge_ble` and `bridge_net` tasks.
   * Displays **Queue Buffers**: Visual color-coded capacity progress bars (`< 50%` Green, `50-80%` Yellow, `> 80%` Red), message counts (`waiting / capacity`), and drop counters for `TCP ➔ BLE`, `BLE ➔ TCP`, and `MQTT ➔ BLE` queues.

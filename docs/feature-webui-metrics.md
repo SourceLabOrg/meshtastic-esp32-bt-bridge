@@ -105,20 +105,21 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
 ## UI Card Layout & Placement
 
 ### 1. WiFi Network Card
+* **Connection Status**: Displays a live status pill (`Connected` / `AP Mode` / `Disconnected` / `Not Configured`).
 * **IP Address**: Displays active local IP (e.g. `192.168.1.145`) or AP IP (`192.168.4.1`).
 * **mDNS Host**: Displays active mDNS broadcast address (e.g. `dsc-ae28.local`).
-* **Signal Strength (RSSI)**: Displays RSSI value (e.g. `-58 dBm`) with qualitative label (e.g. Excellent / Good / Fair / Poor).
+* **Signal Strength (RSSI)**: Displays RSSI value (e.g. `-58 dBm`) alongside a colored qualitative pill (`Excellent` / `Good` / `Fair` / `Weak`).
 
 ### 2. Bluetooth Meshtastic Device Card
 * **Connection Status**: Displays a live status pill (`Connected` / `Disconnected` / `Connecting`).
 
 ### 3. MQTT Gateway Card
-* **Gateway Status**: Feature toggle state, connection state pill, radio proxy detection, active server/port/TLS mode, and traffic counters (Sent / Received / Dropped).
+* **Client Status**: Displays live connection status pill (`Connected` / `Waiting for Radio Config` / `Connecting...` / `Disabled` / `Error`), radio proxy detection, active server/port/TLS mode, and traffic counters (Sent / Received).
 
 ### 4. System Card
 * **Live Polling Toggle**: Toggle switch to pause/resume auto-refreshing stats every 7 seconds (defaults to **Enabled**).
 * **System Uptime**: Formatted uptime string (e.g., `1h 24m 12s`).
-* **Active TCP Clients**: `X / 3 connected`.
+* **Active TCP Clients**: `X / 3`.
 * **Memory (Heap)**: Free Heap, Minimum Recorded Free Heap, and Maximum Allocatable Block (in KB).
 * **Task Stack Free Headroom**: Free stack space for `bridge_ble` and `bridge_net` tasks.
 * **Queue Buffers (Visual Progress Bars)**:

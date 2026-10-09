@@ -108,6 +108,10 @@ const char index_html[] PROGMEM = R"rawliteral(
         <span class="info-val" id="view-wifi-pass">••••••••</span>
       </div>
       <div class="info-row">
+        <span class="info-label">Connection:</span>
+        <span class="info-val"><span id="view-wifi-status-pill" class="status-pill waiting">Unknown</span></span>
+      </div>
+      <div class="info-row">
         <span class="info-label">IP Address:</span>
         <span class="info-val" id="view-wifi-ip">Loading...</span>
       </div>
@@ -203,10 +207,10 @@ const char index_html[] PROGMEM = R"rawliteral(
         <span class="info-val"><span id="view-mqtt-feature-enabled-pill" class="status-pill waiting">Unknown: Loading...</span></span>
       </div>
 
-      <!-- If Enabled, status of the service, otherwise hidden -->
+      <!-- If Enabled, status of the client, otherwise hidden -->
       <div id="mqtt-gateway-status-container" style="display: none;">
         <div class="info-row">
-          <span class="info-label">Service Status:</span>
+          <span class="info-label">Client Status:</span>
           <span class="info-val"><span id="view-mqtt-status-pill" class="status-pill disabled">Disabled</span></span>
         </div>
         <div class="info-row">
@@ -530,6 +534,23 @@ const char index_html[] PROGMEM = R"rawliteral(
         .then(st => {
           // WiFi Metrics
           if (st.wifi) {
+            const wifiPill = document.getElementById('view-wifi-status-pill');
+            if (wifiPill) {
+              if (st.wifi.is_ap_mode) {
+                wifiPill.innerText = 'AP Mode';
+                wifiPill.className = 'status-pill waiting';
+              } else if (st.wifi.connected) {
+                wifiPill.innerText = 'Connected';
+                wifiPill.className = 'status-pill connected';
+              } else if (!currentConfig.wifi_ssid) {
+                wifiPill.innerText = 'Not Configured';
+                wifiPill.className = 'status-pill disabled';
+              } else {
+                wifiPill.innerText = 'Disconnected';
+                wifiPill.className = 'status-pill error';
+              }
+            }
+
             const ipEl = document.getElementById('view-wifi-ip');
             if (ipEl) ipEl.innerText = st.wifi.ip + (st.wifi.is_ap_mode ? ' (AP Mode)' : '');
             const mdnsEl = document.getElementById('view-wifi-mdns');
@@ -537,15 +558,16 @@ const char index_html[] PROGMEM = R"rawliteral(
             const rssiEl = document.getElementById('view-wifi-rssi');
             if (rssiEl) {
               if (st.wifi.connected && !st.wifi.is_ap_mode) {
-                let quality = 'Weak';
-                if (st.wifi.rssi >= -60) quality = 'Excellent';
-                else if (st.wifi.rssi >= -70) quality = 'Good';
-                else if (st.wifi.rssi >= -80) quality = 'Fair';
-                rssiEl.innerText = st.wifi.rssi + ' dBm (' + quality + ')';
+                let pillClass = 'status-pill error';
+                let label = 'Weak';
+                if (st.wifi.rssi >= -60) { pillClass = 'status-pill connected'; label = 'Excellent'; }
+                else if (st.wifi.rssi >= -70) { pillClass = 'status-pill connected'; label = 'Good'; }
+                else if (st.wifi.rssi >= -80) { pillClass = 'status-pill waiting'; label = 'Fair'; }
+                rssiEl.innerHTML = st.wifi.rssi + ' dBm <span class="' + pillClass + '" style="margin-left:4px;">' + label + '</span>';
               } else if (st.wifi.is_ap_mode) {
-                rssiEl.innerText = 'N/A (AP Mode)';
+                rssiEl.innerHTML = '<span class="status-pill disabled">N/A (AP Mode)</span>';
               } else {
-                rssiEl.innerText = 'Disconnected';
+                rssiEl.innerHTML = '<span class="status-pill disabled">Disconnected</span>';
               }
             }
           }
@@ -602,13 +624,13 @@ const char index_html[] PROGMEM = R"rawliteral(
               document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
             }
             document.getElementById('view-mqtt-root').innerText = m.active_root || m.radio_root || 'msh';
-            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd / ✖ ' + (m.dropped || 0) + ' dropped';
+            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd';
           }
 
           // System Metrics
           document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
           if (st.tcp) {
-            document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3) + ' active';
+            document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3);
           }
           if (st.heap) {
             const freeKb = Math.round(st.heap.free_bytes / 1024);
