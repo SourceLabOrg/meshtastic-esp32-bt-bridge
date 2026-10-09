@@ -79,12 +79,12 @@ const char index_html[] PROGMEM = R"rawliteral(
 </style>
 </head>
 <body>
-  <h2>📡 Meshtastic Bridge</h2>
+  <h2>Meshtastic Bridge</h2>
 
   <!-- WiFi Configuration Card -->
   <div class="card" id="card-wifi">
     <div class="card-header">
-      <div class="card-title">📶 WiFi Network</div>
+      <div class="card-title">WiFi Network</div>
       <button class="btn-edit" id="btn-edit-wifi" onclick="toggleEditWifi(true)">Edit</button>
     </div>
     <div id="wifi-view">
@@ -120,10 +120,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
-  <!-- Bluetooth Target Card -->
+  <!-- Bluetooth Meshtastic Radio Card -->
   <div class="card" id="card-ble">
     <div class="card-header">
-      <div class="card-title">📻 Bluetooth Target</div>
+      <div class="card-title">Bluetooth Meshtastic Device</div>
       <button class="btn-edit" id="btn-edit-ble" onclick="toggleEditBle(true)">Edit</button>
     </div>
     <div id="ble-view">
@@ -138,6 +138,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div id="ble-edit" style="display:none;">
       <label>Discovered Devices:</label>
+      <div id="ble-scan-alert" class="alert"></div>
       <div id="scan-status" class="spinner">Scanning for Bluetooth devices (4 seconds)...</div>
       <select id="select-ble-device" onchange="onBleDeviceSelected()">
         <option value="">-- Select or scan below --</option>
@@ -152,7 +153,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       <label>BLE PIN (6-digit):</label>
       <input type="number" id="input-ble-pin" min="0" max="999999" placeholder="123456">
 
-      <div id="ble-alert" class="alert"></div>
+      <div id="ble-edit-alert" class="alert"></div>
 
       <button type="button" id="btn-test-ble" class="btn-warning" onclick="testBleConnection()">⚡ Test Connection</button>
       <div class="btn-group">
@@ -165,39 +166,56 @@ const char index_html[] PROGMEM = R"rawliteral(
   <!-- MQTT Gateway Card -->
   <div class="card" id="card-mqtt">
     <div class="card-header">
-      <div class="card-title">🌐 MQTT Gateway</div>
+      <div class="card-title">MQTT Gateway</div>
       <button class="btn-edit" id="btn-edit-mqtt" onclick="toggleEditMqtt(true)">Edit</button>
     </div>
     <div id="mqtt-view">
+      <!-- Global Feature Enabled/Disabled -->
       <div class="info-row">
-        <span class="info-label">Status:</span>
-        <span class="info-val"><span id="view-mqtt-status-pill" class="status-pill disabled">Disabled</span></span>
+        <span class="info-label">Gateway Feature:</span>
+        <span class="info-val"><span id="view-mqtt-feature-enabled-pill" class="status-pill waiting">Unknown: Loading...</span></span>
       </div>
-      <div class="info-row">
-        <span class="info-label">Radio Proxy:</span>
-        <span class="info-val" id="view-mqtt-radio-proxy">(Unknown)</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">Detected Broker:</span>
-        <span class="info-val" id="view-mqtt-broker">(Waiting for radio)</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">Root Topic:</span>
-        <span class="info-val" id="view-mqtt-root">msh</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">Traffic:</span>
-        <span class="info-val" id="view-mqtt-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+
+      <!-- If Enabled, status of the service, otherwise hidden -->
+      <div id="mqtt-gateway-status-container" style="display: none;">
+        <div class="info-row">
+          <span class="info-label">Service Status:</span>
+          <span class="info-val"><span id="view-mqtt-status-pill" class="status-pill disabled">Disabled</span></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Radio Proxy:</span>
+          <span class="info-val" id="view-mqtt-radio-proxy">(Unknown)</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Detected Broker:</span>
+          <span class="info-val" id="view-mqtt-broker">(Waiting for radio)</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Root Topic:</span>
+          <span class="info-val" id="view-mqtt-root">msh</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Traffic:</span>
+          <span class="info-val" id="view-mqtt-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+        </div>
       </div>
     </div>
     <div id="mqtt-edit" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-        <label for="input-mqtt-enabled" style="margin:0; font-size:14px; font-weight:600;">Enable MQTT Gateway</label>
-        <input type="checkbox" id="input-mqtt-enabled" style="width:20px; height:20px; margin:0;">
+      <div class="alert alert-info" style="display:block; margin-bottom: 12px;">
+        The bridge automatically queries your radio for its MQTT settings (hostname, credentials, and root topic) and connects
+        to that server.<br/>
+        <br/>
+        <strong>NOTE</strong>: Make sure your radio has both <strong>MQTT Enabled</strong> and <strong>MQTT Proxy Enabled</strong> configured.
       </div>
 
-      <div class="alert alert-info" style="display:block; margin-bottom: 12px;">
-        <strong>Auto-Sync Mode:</strong> The bridge automatically connects to the MQTT broker, credentials, and root topic configured on the connected Meshtastic radio.
+      <div style="margin: 10px 0 6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+          <label for="input-mqtt-enabled" style="margin:0; font-size:14px; font-weight:600;">Enable MQTT Gateway</label>
+          <input type="checkbox" id="input-mqtt-enabled" style="width:20px; height:20px; margin:0;">
+        </div>
+        <small style="color:#65676b; display:block; margin-bottom:10px;">
+          Enable/Disable this feature.
+        </small>
       </div>
 
       <div style="margin: 10px 0 6px;">
@@ -205,18 +223,22 @@ const char index_html[] PROGMEM = R"rawliteral(
           <label for="input-mqtt-tls-insecure" style="margin:0; font-size:13px;">Skip Certificate Validation</label>
           <input type="checkbox" id="input-mqtt-tls-insecure" style="width:20px; height:20px; margin:0;">
         </div>
-        <small style="color:#65676b; display:block; margin-bottom:10px;">Allow connections to local LAN brokers using self-signed certificates or IP addresses.</small>
+        <small style="color:#65676b; display:block; margin-bottom:10px;">Allow connections to brokers using self-signed certificates, IP addresses, or invalid SSL certificates.</small>
       </div>
 
       <div style="margin: 10px 0;">
-        <label style="margin-bottom:4px;">Custom CA Certificate (Optional PEM):</label>
-        <textarea id="input-mqtt-ca" rows="4" maxlength="3500" style="width:100%; padding:8px; border:1px solid #ccd0d5; border-radius:6px; font-family:monospace; font-size:11px; resize:vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        <label style="margin-bottom:4px;">Server Certificate (Optional):</label>
+        <textarea id="input-mqtt-ca" rows="4" maxlength="3500" style="width:100%; padding:8px; border:1px solid #ccd0d5; border-radius:6px; font-family:monospace; font-size:11px; resize:vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;&#10;-----END CERTIFICATE-----"></textarea>
         <div style="display:flex; gap:8px; margin-top:4px;">
           <input type="file" id="file-mqtt-ca" accept=".pem,.crt,.cer" style="display:none;" onchange="loadCaFile(this)">
           <button type="button" class="btn-secondary" style="flex:1; padding:6px; font-size:12px; margin:0;" onclick="document.getElementById('file-mqtt-ca').click()">📂 Load Cert File</button>
           <button type="button" class="btn-secondary" style="flex:1; padding:6px; font-size:12px; margin:0;" onclick="document.getElementById('input-mqtt-ca').value=''">🗑 Clear</button>
         </div>
-        <small style="color:#65676b; display:block; margin-top:4px;">Leave blank to use built-in Mozilla Root CAs (Let's Encrypt, DigiCert, etc.)</small>
+        <small style="color:#65676b; display:block; margin-top:4px;">
+          Paste the public certificate or CA certificate for servers using self-signed SSL certificates.
+          This allows the bridge to validate the server's identity even when it's not signed by a trusted certificate authority.<br/><br/>
+          Leave blank to use built-in Mozilla Root CAs (Let's Encrypt, DigiCert, etc.)
+        </small>
       </div>
 
       <div id="mqtt-alert" class="alert"></div>
@@ -230,7 +252,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <!-- System Actions Card -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title">🚀 System</div>
+      <div class="card-title">System</div>
     </div>
     <div id="system-alert" class="alert"></div>
 
@@ -383,14 +405,35 @@ const char index_html[] PROGMEM = R"rawliteral(
       fetch('/mqtt_status')
         .then(r => r.json())
         .then(st => {
-          const pill = document.getElementById('view-mqtt-status-pill');
-          if (pill) {
-            pill.innerText = st.state || 'Disabled';
-            if (st.state === 'Connected') pill.className = 'status-pill connected';
-            else if (st.state === 'Waiting for Radio Config') pill.className = 'status-pill waiting';
-            else if (st.state === 'Connecting...') pill.className = 'status-pill connecting';
-            else if (st.state === 'Disabled') pill.className = 'status-pill disabled';
-            else pill.className = 'status-pill error';
+          // Global Feature Enabled/Disabled State
+          const featureEnabledPill = document.getElementById('view-mqtt-feature-enabled-pill');
+          if (featureEnabledPill) {
+            if (st.gateway_enabled === true) {
+              // Enabled, show status-container
+              featureEnabledPill.innerText = 'Enabled';
+              featureEnabledPill.className = 'status-pill connected';
+            } else {
+              // Disabled
+              featureEnabledPill.innerText = 'Disabled';
+              featureEnabledPill.className = 'status-pill disabled';
+            }
+          }
+
+          // Status of Service Container show/hide.
+          const mqttStatusContainer = document.getElementById('mqtt-gateway-status-container');
+          if (mqttStatusContainer) {
+            mqttStatusContainer.style.display = st.gateway_enabled ? 'block' : 'none';
+          }
+
+          // Update status pill.
+          const statusPill = document.getElementById('view-mqtt-status-pill');
+          if (statusPill) {
+            statusPill.innerText = st.state || 'Disabled';
+            if (st.state === 'Connected') statusPill.className = 'status-pill connected';
+            else if (st.state === 'Waiting for Radio Config') statusPill.className = 'status-pill waiting';
+            else if (st.state === 'Connecting...') statusPill.className = 'status-pill connecting';
+            else if (st.state === 'Disabled') statusPill.className = 'status-pill disabled';
+            else statusPill.className = 'status-pill error';
           }
 
           document.getElementById('view-mqtt-radio-proxy').innerText = st.radio_proxy_enabled ? 'Enabled (Ready)' : (st.radio_server ? 'Disabled on Radio' : '(Waiting for radio)');
@@ -507,7 +550,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       document.getElementById('ble-view').style.display = edit ? 'none' : 'block';
       document.getElementById('ble-edit').style.display = edit ? 'block' : 'none';
       document.getElementById('btn-edit-ble').style.display = edit ? 'none' : 'block';
-      hideAlert('ble-alert');
+      hideAlert('ble-scan-alert');
+      hideAlert('ble-edit-alert');
       if (edit) {
         scanBle();
       }
@@ -538,10 +582,14 @@ const char index_html[] PROGMEM = R"rawliteral(
       btnScan.disabled = true;
       btnTest.disabled = true;
       btnSave.disabled = true;
+      select.disabled = true;
+      select.style.display = 'none';
 
       select.innerHTML = '<option value="">-- Scan in progress... --</option>';
       status.innerText = 'Scanning for Bluetooth devices (4 seconds)...';
       status.style.display = 'block';
+      hideAlert('ble-scan-alert');
+      hideAlert('ble-edit-alert');
 
       fetch('/start_scan')
         .then(() => {
@@ -556,7 +604,13 @@ const char index_html[] PROGMEM = R"rawliteral(
                   btnScan.disabled = false;
                   btnTest.disabled = false;
                   btnSave.disabled = false;
+                  select.disabled = false;
                   status.style.display = 'none';
+                  select.style.display = 'block';
+
+                  if (data.error !== null) {
+                    showAlert('ble-scan-alert', 'error', data.error);
+                  }
 
                   select.innerHTML = '<option value="">-- Select Discovered Device --</option>';
                   if (!data.devices || data.devices.length === 0) {
@@ -581,8 +635,10 @@ const char index_html[] PROGMEM = R"rawliteral(
                 btnScan.disabled = false;
                 btnTest.disabled = false;
                 btnSave.disabled = false;
+                select.disabled = false;
                 status.innerText = 'Error checking scan status.';
                 status.style.display = 'block';
+                select.style.display = 'block';
               });
           }, 800);
         })
@@ -590,8 +646,10 @@ const char index_html[] PROGMEM = R"rawliteral(
           btnScan.disabled = false;
           btnTest.disabled = false;
           btnSave.disabled = false;
+          select.disabled = false;
           status.innerText = 'Error initiating BLE scan.';
           status.style.display = 'block';
+          select.style.display = 'block';
         });
     }
 
@@ -631,11 +689,11 @@ const char index_html[] PROGMEM = R"rawliteral(
       const pin = document.getElementById('input-ble-pin').value.trim();
 
       if (!mac) {
-        showAlert('ble-alert', 'error', 'Target BLE MAC address cannot be empty.');
+        showAlert('ble-edit-alert', 'error', 'Target BLE MAC address cannot be empty.');
         return;
       }
       if (!pin) {
-        showAlert('ble-alert', 'error', 'BLE 6-digit PIN cannot be empty.');
+        showAlert('ble-edit-alert', 'error', 'BLE 6-digit PIN cannot be empty.');
         return;
       }
 
@@ -648,16 +706,16 @@ const char index_html[] PROGMEM = R"rawliteral(
       .then(r => r.json())
       .then(res => {
         if (res.success) {
-          showAlert('ble-alert', 'success', 'Bluetooth settings saved!');
+          showAlert('ble-edit-alert', 'success', 'Bluetooth settings saved!');
           setTimeout(() => {
             toggleEditBle(false);
             loadConfig();
           }, 800);
         } else {
-          showAlert('ble-alert', 'error', res.error || 'Failed to save Bluetooth.');
+          showAlert('ble-edit-alert', 'error', res.error || 'Failed to save Bluetooth.');
         }
       })
-      .catch(() => showAlert('ble-alert', 'error', 'Network error saving Bluetooth.'));
+      .catch(() => showAlert('ble-edit-alert', 'error', 'Network error saving Bluetooth.'));
     }
 
     let testInterval = null;
@@ -668,13 +726,14 @@ const char index_html[] PROGMEM = R"rawliteral(
       const btnTest = document.getElementById('btn-test-ble');
       const btnScan = document.getElementById('btn-scan');
       const btnSave = document.getElementById('btn-save-ble');
+      const select = document.getElementById('select-ble-device');
 
       if (!mac) {
-        showAlert('ble-alert', 'error', 'Please enter or select a BLE MAC address first.');
+        showAlert('ble-edit-alert', 'error', 'Please enter or select a BLE MAC address first.');
         return;
       }
       if (!pin) {
-        showAlert('ble-alert', 'error', 'Please enter the 6-digit pairing PIN.');
+        showAlert('ble-edit-alert', 'error', 'Please enter the 6-digit pairing PIN.');
         return;
       }
 
@@ -687,8 +746,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       btnTest.disabled = true;
       btnScan.disabled = true;
       btnSave.disabled = true;
+      select.disabled = true;
       btnTest.innerText = 'Connecting & Testing...';
-      showAlert('ble-alert', 'info', 'Connecting to ' + mac + ' and verifying Meshtastic radio service...');
+      showAlert('ble-edit-alert', 'info', 'Connecting to ' + mac + ' and verifying Meshtastic radio service...');
 
       const body = 'ble_mac=' + encodeURIComponent(mac) + '&ble_pin=' + encodeURIComponent(pin);
       let elapsedTicks = 0;
@@ -707,8 +767,9 @@ const char index_html[] PROGMEM = R"rawliteral(
             btnTest.disabled = false;
             btnScan.disabled = false;
             btnSave.disabled = false;
+            select.disabled = false;
             btnTest.innerText = '⚡ Test Connection';
-            showAlert('ble-alert', 'error', 'Test timed out after 12 seconds.');
+            showAlert('ble-edit-alert', 'error', 'Test timed out after 12 seconds.');
             return;
           }
 
@@ -721,12 +782,13 @@ const char index_html[] PROGMEM = R"rawliteral(
                 btnTest.disabled = false;
                 btnScan.disabled = false;
                 btnSave.disabled = false;
+                select.disabled = false;
                 btnTest.innerText = '⚡ Test Connection';
 
                 if (res.success) {
-                  showAlert('ble-alert', 'success', '✓ ' + (res.message || 'Connected and verified successfully!'));
+                  showAlert('ble-edit-alert', 'success', '✓ ' + (res.message || 'Connected and verified successfully!'));
                 } else {
-                  showAlert('ble-alert', 'error', '✗ ' + (res.error || res.message || 'Connection test failed.'));
+                  showAlert('ble-edit-alert', 'error', '✗ ' + (res.error || res.message || 'Connection test failed.'));
                 }
               }
             })
@@ -739,8 +801,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         btnTest.disabled = false;
         btnScan.disabled = false;
         btnSave.disabled = false;
+        select.disabled = false;
         btnTest.innerText = '⚡ Test Connection';
-        showAlert('ble-alert', 'error', 'Could not initiate connection test request.');
+        showAlert('ble-edit-alert', 'error', 'Could not initiate connection test request.');
       });
     }
 
@@ -958,7 +1021,8 @@ void config_ui_start_server() {
             request->send(200, "application/json", "{\"status\": \"scanning\"}");
         } else {
             String jsonResults = ble_client_get_scan_results_json();
-            request->send(200, "application/json", "{\"status\": \"done\", \"devices\": " + jsonResults + "}");
+            String lastScanError = ble_client_get_scan_error();
+            request->send(200, "application/json", "{\"status\": \"done\", \"error\": " + (lastScanError.isEmpty() ? "null" : ( "\"" + utils_escape_json(lastScanError) + "\"")) + ", \"devices\": " + jsonResults + "}");
         }
     });
 

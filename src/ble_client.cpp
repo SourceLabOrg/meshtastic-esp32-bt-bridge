@@ -7,6 +7,7 @@
 
 static bool isInitialized = false;
 static bool isScanningFlag = false;
+static String lastScanError = "";
 
 /**
  * Initialize bluetooth radio.
@@ -47,6 +48,7 @@ void ble_client_start_scan() {
 
     // Clear previously cached results before starting a fresh scan
     pScan->clearResults();
+    lastScanError = "";
     isScanningFlag = true;
 
     // Start asynchronous scan for BLUETOOTH_SCAN_TIME_SECONDS
@@ -58,6 +60,7 @@ void ble_client_start_scan() {
 
     if (!started) {
         isScanningFlag = false;
+        lastScanError = "Failed to start scan.";
         log_e("[BLE] Failed to start scan.");
     }
 }
@@ -105,6 +108,10 @@ struct DiscoveredDevice {
     // RSSI Signal Strength of device.
     int rssi;
 };
+
+String ble_client_get_scan_error() {
+    return lastScanError;
+}
 
 /**
  * Returns array of discovered devices, in JSON format.  This will return a

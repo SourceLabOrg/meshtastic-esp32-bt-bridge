@@ -789,6 +789,7 @@ MqttStatus mqtt_net_get_status() {
 String mqtt_net_get_status_json() {
     MqttStatus st = mqtt_net_get_status();
     String json = "{";
+    json += "\"gateway_enabled\":" + String(mqtt_net_is_enabled() ? "true" : "false") + ",";
     json += "\"state\":\"" + st.state_str + "\",";
     json += "\"radio_proxy_enabled\":" + String(st.radio_proxy_enabled ? "true" : "false") + ",";
     json += "\"radio_server\":\"" + utils_escape_json(st.radio_server) + "\",";
