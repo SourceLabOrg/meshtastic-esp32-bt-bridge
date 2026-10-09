@@ -20,23 +20,42 @@ void utils_set_debug_logging(bool enableDebugLogs) {
 }
 
 /**
+ * Append an escaped JSON string directly to an existing String buffer,
+ * avoiding intermediate heap allocations.
+ * @param dest Destination String buffer (should be pre-reserved)
+ * @param input Raw null-terminated C string to escape
+ */
+void utils_escape_json_append(String& dest, const char* input) {
+    if (!input) return;
+    while (*input) {
+        char c = *input++;
+        if (c == '"') dest += "\\\"";
+        else if (c == '\\') dest += "\\\\";
+        else if (c == '\b') dest += "\\b";
+        else if (c == '\f') dest += "\\f";
+        else if (c == '\n') dest += "\\n";
+        else if (c == '\r') dest += "\\r";
+        else if (c == '\t') dest += "\\t";
+        else if (c >= 32 && c <= 126) dest += c;
+    }
+}
+
+/**
+ * Overload to append an escaped Arduino String directly to a destination String buffer.
+ */
+void utils_escape_json_append(String& dest, const String& input) {
+    utils_escape_json_append(dest, input.c_str());
+}
+
+/**
  * Given a string json value, escape it.
  * @param input Value to be escaped.
  * @return Escaped input.
  */
 String utils_escape_json(const String& input) {
-    String output = "";
-    for (size_t i = 0; i < input.length(); i++) {
-        char c = input[i];
-        if (c == '"') output += "\\\"";
-        else if (c == '\\') output += "\\\\";
-        else if (c == '\b') output += "\\b";
-        else if (c == '\f') output += "\\f";
-        else if (c == '\n') output += "\\n";
-        else if (c == '\r') output += "\\r";
-        else if (c == '\t') output += "\\t";
-        else if (c >= 32 && c <= 126) output += c;
-    }
+    String output;
+    output.reserve(input.length() + 16);
+    utils_escape_json_append(output, input.c_str());
     return output;
 }
 
