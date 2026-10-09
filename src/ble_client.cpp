@@ -3,17 +3,37 @@
 #include <NimBLEDevice.h>
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include "build_options.h"
 
-static bool isInitialized = false;
-static bool isScanningFlag = false;
+/**
+ * Is Initialized Flag, gets set to true after initialization.
+ */
+static std::atomic<bool> isInitialized{false};
+
+/**
+ * Is scanning for BLE devices flag, gets set to true while a scan
+ * is active.
+ */
+static std::atomic<bool> isScanningFlag{false};
+
+/**
+ * Contains the last error that occurred during a BLE device
+ * discovery scan, or gets set to empty string if no such error
+ * is present.
+ *
+ * NOTE: As currently written, should be thread safe for reads/writes.
+ */
 static String lastScanError = "";
 
 /**
  * Initialize bluetooth radio.
  */
 void ble_client_init() {
-    if (isInitialized) return;
+    // Prevent multiple initializations.
+    if (isInitialized) {
+        return;
+    }
     NimBLEDevice::init("Meshtastic-Bridge");
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
@@ -206,7 +226,7 @@ static uint32_t activePasskey = 123456;
 /**
  * State flag, gets set to true when testing a BLE connection/configuration.
  */
-static bool isTestingFlag = false;
+static std::atomic<bool> isTestingFlag{false};
 
 /**
  * Cached BLE connection test result.
