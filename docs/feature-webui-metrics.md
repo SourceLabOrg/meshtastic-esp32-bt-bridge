@@ -36,7 +36,7 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
 
 * **Single HTTP Request Per Interval**: Eliminates multiple polling timers, reducing TCP handshakes and preserving ESPAsyncWebServer / LwIP memory.
 * **Atomic Telemetry Snapshot**: Samples heap, WiFi, BLE, TCP clients, queue occupancies, and MQTT proxy state in a single tick.
-* **Zero Heap Fragmentation**: Response JSON is built in a single pre-reserved buffer (`json.reserve(768)`).
+* **Zero Heap Fragmentation**: Response JSON is built with zero intermediate heap allocations into a single pre-reserved buffer (`json.reserve(1024)`).
 * **Polling Strategy**:
   * Interval: **7 seconds**.
   * **Polling Behavior**: Enabled by default on page load (with an initial fetch upon `window.onload`) to ensure MQTT telemetry and system health remain continuously synchronized. A toggle switch in the System card allows the user to pause/resume live polling if desired.
