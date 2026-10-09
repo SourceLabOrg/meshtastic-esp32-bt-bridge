@@ -155,7 +155,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div id="ble-view">
       <div class="info-row">
-        <span class="info-label">Target Device:</span>
+        <span class="info-label">Device:</span>
         <span class="info-val" id="view-ble-device">Loading...</span>
       </div>
       <div class="info-row">
