@@ -1213,7 +1213,7 @@ void config_ui_start_server() {
         String mdnsHost = wifi_net_get_mdns_host();
 
         String json;
-        json.reserve(768);
+        json.reserve(1024);
 
         json = "{";
         json += "\"uptime_seconds\":" + String(uptime) + ",";

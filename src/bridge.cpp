@@ -39,6 +39,7 @@ static QueueHandle_t mqtt_to_ble_queue = NULL;
  */
 static std::atomic<uint32_t> s_tcp_to_ble_dropped{0};
 static std::atomic<uint32_t> s_ble_to_tcp_dropped{0};
+static std::atomic<bool> s_ble_connected{false};
 
 struct ClientContext {
     AsyncClient* client;
@@ -194,6 +195,7 @@ public:
 
     void onDisconnect(NimBLEClient* pClient) override {
         log_w("[Bridge-BLE] BLE client disconnected.");
+        s_ble_connected.store(false, std::memory_order_relaxed);
         mqtt_net_on_ble_disconnected();
     }
 };
@@ -215,6 +217,7 @@ static void bridgeBleTask(void* parameter) {
          * Blink the status LED appropriately to indicate no BLE connection is active.
          */
         if (!bleClient || !bleClient->isConnected()) {
+            s_ble_connected.store(false, std::memory_order_relaxed);
             status_led_set(LED_MED_BLINK);
             log_i("[Bridge-BLE] Attempting to connect to Meshtastic BLE device...");
 
@@ -249,14 +252,17 @@ static void bridgeBleTask(void* parameter) {
                         bool sub = fromNumChar->subscribe(true, notifyFromNum);
                         log_d("[Bridge-BLE] Subscribed to FromNum: %d", sub);
                     }
+                    s_ble_connected.store(true, std::memory_order_relaxed);
                     log_i("[Bridge-BLE] BLE setup complete. Bridging active.");
                     status_led_set(LED_SOLID_ON);
                     mqtt_net_on_ble_connected();
                 } else {
                     log_w("[Bridge-BLE] Meshtastic service not found!");
+                    s_ble_connected.store(false, std::memory_order_relaxed);
                     bleClient->disconnect();
                 }
             } else {
+                s_ble_connected.store(false, std::memory_order_relaxed);
                 log_w("[Bridge-BLE] Connection failed, retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
                 delay(BLUETOOTH_RECONNECT_DELAY_MS);
             }
@@ -513,10 +519,10 @@ void bridge_start() {
 }
 
 /**
- * @return True if the BLE device is connected, false if not
+ * @return True if the BLE device is connected, false if not (wait-free atomic read)
  */
 bool bridge_is_ble_connected() {
-    return (bleClient != NULL && bleClient->isConnected() && toRadioChar != NULL);
+    return s_ble_connected.load(std::memory_order_relaxed);
 }
 
 /**
