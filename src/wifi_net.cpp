@@ -27,6 +27,11 @@ bool isApMode = false;
 static String cachedWifiResultsJson = "[]";
 
 /**
+ * Holds the active advertised mDNS hostname.
+ */
+static String s_mdns_host = "";
+
+/**
  * Start a scan for available wifi networks.
  */
 void wifi_net_start_scan() {
@@ -276,10 +281,19 @@ void wifi_net_start_mdns(const BridgeConfig& cfg) {
         MDNS.addServiceTxt("meshtastic", "tcp", "name", mdns_name.c_str());
         MDNS.addServiceTxt("meshtastic", "tcp", "shortname", short_name.c_str());
         MDNS.addServiceTxt("meshtastic", "tcp", "id", node_id.c_str());
-        log_i("[MDNS] mDNS auto-discovery started (%s.local as '%s_%s')", mdns_host.c_str(), short_name.c_str(), node_id.substring(node_id.length() - 4).c_str());
+        s_mdns_host = mdns_host + ".local";
+        log_i("[MDNS] mDNS auto-discovery started (%s as '%s_%s')", s_mdns_host.c_str(), short_name.c_str(), node_id.substring(node_id.length() - 4).c_str());
     } else {
         log_e("[MDNS] Error: Failed to start MDNS advertisement.");
     }
+}
+
+/**
+ * @return Active advertised mDNS hostname (e.g. "mesh-af28.local") or empty if not active.
+ * Thread-safe: written once during boot before the webserver starts serving requests.
+ */
+const String& wifi_net_get_mdns_host() {
+    return s_mdns_host;
 }
 
 /**

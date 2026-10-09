@@ -16,6 +16,7 @@
 *   **Web Flasher & GitHub Pages:** Built a zero-install Web Flasher (`web/index.html`) using ESP Web Tools, and an automated GitHub Actions pipeline (`pages.yml`) to deploy it dynamically to GitHub Pages upon every new release.
 *   **Documentation:** Authored comprehensive `README.md` and detailed architectural markdown files.
 *   **Static FreeRTOS Queue Migration:** Migrated all inter-task FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, `mqtt_to_ble_queue`) to `xQueueCreateStatic` with pre-allocated `.bss` buffers for 100% compile-time deterministic memory allocation and zero runtime heap fragmentation.
+*   **Live Diagnostic & Queue Telemetry in WebUI:** Implemented consolidated wait-free `GET /status` endpoint and exposed live system metrics (uptime, heap memory, FreeRTOS task stacks, TCP clients, color-coded queue buffer capacity progress bars with drop counters, active IP/mDNS/RSSI, and MQTT telemetry) across UI cards with client-side polling controls. Detailed in [docs/feature-webui-metrics.md](file:///Users/spowis/Documents/code/meshtastic-esp32-bt-bridge/docs/feature-webui-metrics.md).
 
 ## Hardware Profiles Supported
 *   **Seeed XIAO ESP32-S3** (`seeed_xiao_esp32s3`): Native USB, Active Low LED.
@@ -24,6 +25,5 @@
 
 ## Outstanding Features & Future Roadmap
 *   **Over-The-Air (OTA) Updates:** Integrate WebOTA or ArduinoOTA to allow firmware updates directly over WiFi without USB.
-*   periodically poll queue sizes and log when reaches a high water mark (IE queue X is 75% full) (maybe even expose via webui)
 *   DRY out notifyFromRadio() and bridgeBleTask() in bridge.cpp?
 *   **MQTT Proxy Fallback Policy:** Decide whether `MqttClientProxyMessage` uplink packets should be dropped or allowed to fall through to TCP clients when the bridge's MQTT Gateway is enabled but the broker connection is temporarily offline.

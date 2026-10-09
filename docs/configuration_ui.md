@@ -9,23 +9,29 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 
 ### 1. Modular Card Design
 * **WiFi Network Card:**
-  * Displays the current configured SSID and masked password status.
+  * Displays the current configured SSID, masked password status, live WiFi connection status pill (`Connected` / `AP Mode` / `Disconnected` / `Not Configured`), active IP address, advertised mDNS hostname (e.g. `dsc-ae28.local`), and live WiFi RSSI signal strength with colored quality pill (`Excellent` / `Good` / `Fair` / `Weak`).
   * In Edit mode, offers a live scan dropdown of nearby WiFi networks (with RSSI signal levels and lock/open security indicators), manual SSID entry for hidden networks, and Password input with a **Show/Hide** toggle.
   * Features a **🔍 Scan for Networks** button (with scan in progress indicator and scan/save buttons disabled during scans).
   * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
 * **Bluetooth Target Card:**
-  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed) and masked PIN.
+  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed), masked PIN, and live Bluetooth connection status pill (`Connected` / `Disconnected`).
   * In Edit mode, offers a live scan dropdown with RSSI signal strengths, manual MAC entry, and 6-digit PIN input.
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
   * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
 * **MQTT Gateway Card:**
-  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, and published/received telemetry packet counters.
+  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, Client Status pill, and published/received telemetry packet counters.
   * In Edit mode, offers:
     * **Enable MQTT Gateway** toggle.
     * **Skip Certificate Validation** toggle (for self-signed / local LAN brokers).
     * **Custom CA Root Certificate** textarea for uploading private PEM certificates.
   * Independent **Save MQTT Settings** button persists settings to NVS and applies them immediately.
 * **System Actions Card:**
+  * Displays formatted **System Uptime** (e.g. `1h 24m 12s`).
+  * Displays active **TCP Clients** (`X / 3`).
+  * Displays **Memory (Heap)** stats: Free Heap, Minimum Recorded Free Heap, and Maximum Allocatable Block in KB.
+  * Displays **Free Task Stacks** high-water mark headroom for `bridge_ble` and `bridge_net` tasks.
+  * Displays **Queue Buffers**: Visual color-coded capacity progress bars (`< 50%` Green, `50-80%` Yellow, `> 80%` Red), message counts (`waiting / capacity`), and drop counters for `TCP ➔ BLE`, `BLE ➔ TCP`, and `MQTT ➔ BLE` queues.
+  * Contains a toggle for **Live Telemetry Polling (7s)** (enabled by default, with dynamic 7s ➔ 3s ➔ 1s rate cycling via the <kbd>P</kbd> key).
   * Contains a toggle for **Enable Serial Debug Logs**.
   * Contains a **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
   * Contains a **Reset All Settings** action (with confirmation dialog) that clears all stored NVS credentials and restarts into Setup Mode.
@@ -56,7 +62,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 2. **Web Server Endpoints (`config_ui.cpp`)**:
    * **`GET /`**: Serves the single-page HTML/CSS/JS application directly from flash (`PROGMEM`) via `AsyncProgmemResponse` with zero heap allocation.
    * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_tls_insecure":false,"mqtt_custom_ca":"..."}`.
-   * **`GET /mqtt_status`**: Returns live MQTT gateway telemetry JSON polled every 6 seconds by the client: `{"state":"CONNECTED","radio_proxy_enabled":true,"active_server":"...","active_port":8883,"active_tls":true,"published":12,"received":45,"dropped":0,...}`.
+   * **`GET /status`**: Returns unified live diagnostic and telemetry JSON polled every 7 seconds by the client: contains `uptime_seconds`, `heap` (free, min_free, max_alloc), `wifi` (connected, is_ap_mode, ip, rssi, mdns_host), `ble` (connected), `tcp` (connected_clients, max_clients), `queues` (waiting, capacity, dropped for `tcp_to_ble`, `ble_to_tcp`, `mqtt_to_ble`), `stacks` (ble_task, net_task free bytes), and `mqtt` (gateway_enabled, state, radio_proxy_enabled, broker, root, traffic counters).
    * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
    * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
    * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.
@@ -84,7 +90,13 @@ The following keys are stored in the `Preferences` namespace (`bridge_cfg`):
 * `mqtt_custom_ca` (String)
 
 ## Technical Decisions & Considerations
+* **Captive Portal / WebView Compatibility Constraints (macOS / iOS CNA & Windows):**
+  * The WebUI is frequently opened inside constrained OS Captive Portal WebViews (e.g. Apple's Captive Network Assistant `CaptiveNetworkSupport`, Windows Captive Portal, Android CaptivePortalLogin).
+  * **No Native `window.alert()` / `window.confirm()` / `window.prompt()`:** Many OS captive browser engines completely suppress, ignore, or hang on native browser dialogs. All notifications, alerts, and confirmation dialogs must use **custom in-DOM HTML/CSS modals** (e.g., `#modal-overlay`, `.alert-box`) rather than native JavaScript dialogs.
+  * **Self-Contained Offline Assets:** In AP Setup mode, the client device has no upstream internet access. The UI must never reference external CDN scripts, CSS files, or web fonts; all CSS, SVGs, HTML, and JavaScript must be entirely self-contained within `PROGMEM` flash memory.
+  * **No External Navigation / New Tabs:** Popups or links targeting `_blank` may be blocked or forcibly close the CNA window.
+  * **Stateless Client Session:** OS captive popups often discard cookies and `localStorage` when closed; all state must reside in ESP32 NVS or be queried dynamically from `/config` and `/status`.
 * **Zero-Heap PROGMEM Serving:** The main web UI HTML payload is streamed directly out of flash memory via `AsyncProgmemResponse`, eliminating the ~35 KB temporary heap spike when serving web clients.
-* **Client-Side Polling:** Telemetry endpoints like `/mqtt_status` are polled every 6 seconds to maintain live stats (including published, received, and dropped counts) while minimizing network traffic and CPU load.
+* **Client-Side Polling:** The unified `/status` endpoint is polled periodically (defaulting to 7s, dynamically adjustable to 3s or 1s via the <kbd>P</kbd> key) using chained asynchronous requests to maintain real-time telemetry while completely avoiding request stacking and minimizing CPU/network overhead.
 * **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for WiFi and Bluetooth. Using `ESPAsyncWebServer` combined with asynchronous background tasks for BLE operations prevents HTTP request timeouts and prevents radio collisions while switching between WiFi AP and BLE scanning/testing.
 * **NimBLE Stack:** `NimBLE-Arduino` provides low memory footprint BLE client capabilities, essential for coexisting with `ESPAsyncWebServer` and `WiFi` on resource-constrained ESP32-S3 boards without heap exhaustion.
