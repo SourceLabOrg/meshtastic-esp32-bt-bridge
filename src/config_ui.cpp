@@ -2,6 +2,8 @@
 #include "ble_client.h"
 #include "wifi_net.h"
 #include "mqtt_net.h"
+#include "bridge.h"
+#include <WiFi.h>
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include "build_options.h"
@@ -73,6 +75,15 @@ const char index_html[] PROGMEM = R"rawliteral(
   .status-pill.waiting { background-color: #fff3cd; color: #856404; }
   .status-pill.connecting { background-color: #d1ecf1; color: #0c5460; }
   .status-pill.error { background-color: #f8d7da; color: #721c24; }
+  .progress-track { width: 100%; background: #e4e6eb; border-radius: 4px; height: 8px; overflow: hidden; margin-top: 4px; }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease, background-color 0.3s ease; }
+  .progress-green { background-color: #28a745; }
+  .progress-yellow { background-color: #ff9800; }
+  .progress-red { background-color: #dc3545; }
+  .queue-box { margin: 10px 0; }
+  .queue-header { display: flex; justify-content: space-between; font-size: 13px; font-weight: 500; color: #444; }
+  .queue-stats { font-family: monospace; font-size: 12px; color: #050505; }
+  .section-divider { border-top: 1px solid #eee; margin: 14px 0 10px; padding-top: 10px; font-weight: bold; font-size: 14px; color: #1c1e21; }
   .footer { text-align: center; font-size: 12px; color: #65676b; margin-top: 24px; padding-bottom: 20px; }
   .footer a { color: #0066cc; text-decoration: none; font-weight: 600; }
   .footer a:hover { text-decoration: underline; }
@@ -95,6 +106,18 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="info-row">
         <span class="info-label">Password:</span>
         <span class="info-val" id="view-wifi-pass">••••••••</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">IP Address:</span>
+        <span class="info-val" id="view-wifi-ip">Loading...</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">mDNS Host:</span>
+        <span class="info-val" id="view-wifi-mdns">Loading...</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Signal (RSSI):</span>
+        <span class="info-val" id="view-wifi-rssi">Loading...</span>
       </div>
     </div>
     <div id="wifi-edit" style="display:none;">
@@ -134,6 +157,10 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="info-row">
         <span class="info-label">BLE PIN:</span>
         <span class="info-val" id="view-ble-pin">••••••</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Connection:</span>
+        <span class="info-val"><span id="view-ble-status-pill" class="status-pill waiting">Unknown</span></span>
       </div>
     </div>
     <div id="ble-edit" style="display:none;">
@@ -256,9 +283,56 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div id="system-alert" class="alert"></div>
 
+    <div class="info-row">
+      <span class="info-label">Uptime:</span>
+      <span class="info-val" id="view-sys-uptime">Loading...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">TCP Clients:</span>
+      <span class="info-val" id="view-sys-tcp-clients">Loading...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Free Heap:</span>
+      <span class="info-val" id="view-sys-heap">Loading...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Free Task Stacks:</span>
+      <span class="info-val" id="view-sys-stacks">Loading...</span>
+    </div>
+
+    <div class="section-divider">Queue Buffers</div>
+    <div class="queue-box">
+      <div class="queue-header">
+        <span>TCP ➔ BLE Queue:</span>
+        <span class="queue-stats" id="view-queue-t2b-text">0 / 32 (0%) · 0 drops</span>
+      </div>
+      <div class="progress-track"><div id="view-queue-t2b-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
+    </div>
+
+    <div class="queue-box">
+      <div class="queue-header">
+        <span>BLE ➔ TCP Queue:</span>
+        <span class="queue-stats" id="view-queue-b2t-text">0 / 32 (0%) · 0 drops</span>
+      </div>
+      <div class="progress-track"><div id="view-queue-b2t-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
+    </div>
+
+    <div class="queue-box">
+      <div class="queue-header">
+        <span>MQTT ➔ BLE Queue:</span>
+        <span class="queue-stats" id="view-queue-m2b-text">0 / 16 (0%) · 0 drops</span>
+      </div>
+      <div class="progress-track"><div id="view-queue-m2b-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
+    </div>
+
+    <div class="section-divider">Settings & Controls</div>
+    <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin: 10px 0 12px;">
+      <label for="sys-live-polling" style="margin-bottom:0;">Live Telemetry Polling (7s)</label>
+      <input type="checkbox" id="sys-live-polling" checked onchange="toggleLivePolling()" style="width:20px; height:20px; margin:0;">
+    </div>
     <div class="input-group" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
       <label for="sys-debug-logs" style="margin-bottom:0;">Enable Serial Debug Logs</label>
-      <input type="checkbox" id="sys-debug-logs" onchange="saveSystemSettings()" style="width:20px; height:20px;">
+      <input type="checkbox" id="sys-debug-logs" onchange="saveSystemSettings()" style="width:20px; height:20px; margin:0;">
     </div>
 
     <button class="btn-primary" id="btn-reboot" onclick="rebootBridge()">Reboot & Start Bridge</button>
@@ -309,6 +383,49 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     }
 
+    function formatUptime(sec) {
+      if (!sec && sec !== 0) return '(Unknown)';
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (d > 0) return d + 'd ' + h + 'h ' + m + 'm ' + s + 's';
+      if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    }
+
+    function renderProgressBar(barId, textId, waiting, capacity, dropped) {
+      const cap = capacity || 1;
+      const pct = Math.min(100, Math.max(0, Math.round((waiting / cap) * 100)));
+      const barEl = document.getElementById(barId);
+      const textEl = document.getElementById(textId);
+      if (textEl) {
+        textEl.innerText = waiting + ' / ' + cap + ' (' + pct + '%) · ' + (dropped || 0) + ' drops';
+      }
+      if (barEl) {
+        barEl.style.width = pct + '%';
+        let colorClass = 'progress-fill progress-green';
+        if (pct >= 80) colorClass = 'progress-fill progress-red';
+        else if (pct >= 50) colorClass = 'progress-fill progress-yellow';
+        barEl.className = colorClass;
+      }
+    }
+
+    let statusPollTimer = null;
+
+    function toggleLivePolling() {
+      const enabled = document.getElementById('sys-live-polling').checked;
+      if (statusPollTimer) {
+        clearInterval(statusPollTimer);
+        statusPollTimer = null;
+      }
+      if (enabled) {
+        updateStatus();
+        statusPollTimer = setInterval(updateStatus, 7000);
+      }
+    }
+
     function loadConfig() {
       fetch('/config')
         .then(r => r.json())
@@ -334,7 +451,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           document.getElementById('input-mqtt-enabled').checked = !!cfg.mqtt_enabled;
           document.getElementById('input-mqtt-tls-insecure').checked = !!cfg.mqtt_tls_insecure;
           document.getElementById('input-mqtt-ca').value = cfg.mqtt_custom_ca || '';
-          updateMqttStatus();
+          updateStatus();
         })
         .catch(() => {
           document.getElementById('view-wifi-ssid').innerText = 'Error loading';
@@ -395,7 +512,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           setTimeout(() => {
             toggleEditMqtt(false);
             loadConfig();
-            updateMqttStatus();
+            updateStatus();
           }, 800);
         } else {
           showAlert('mqtt-alert', 'error', res.error || 'Failed to save MQTT.');
@@ -407,51 +524,114 @@ const char index_html[] PROGMEM = R"rawliteral(
       });
     }
 
-    function updateMqttStatus() {
-      fetch('/mqtt_status')
+    function updateStatus() {
+      fetch('/status')
         .then(r => r.json())
         .then(st => {
-          // Global Feature Enabled/Disabled State
-          const featureEnabledPill = document.getElementById('view-mqtt-feature-enabled-pill');
-          if (featureEnabledPill) {
-            if (st.gateway_enabled === true) {
-              // Enabled, show status-container
-              featureEnabledPill.innerText = 'Enabled';
-              featureEnabledPill.className = 'status-pill connected';
-            } else {
-              // Disabled
-              featureEnabledPill.innerText = 'Disabled';
-              featureEnabledPill.className = 'status-pill disabled';
+          // WiFi Metrics
+          if (st.wifi) {
+            const ipEl = document.getElementById('view-wifi-ip');
+            if (ipEl) ipEl.innerText = st.wifi.ip + (st.wifi.is_ap_mode ? ' (AP Mode)' : '');
+            const mdnsEl = document.getElementById('view-wifi-mdns');
+            if (mdnsEl) mdnsEl.innerText = st.wifi.mdns_host || '(Not active)';
+            const rssiEl = document.getElementById('view-wifi-rssi');
+            if (rssiEl) {
+              if (st.wifi.connected && !st.wifi.is_ap_mode) {
+                let quality = 'Weak';
+                if (st.wifi.rssi >= -60) quality = 'Excellent';
+                else if (st.wifi.rssi >= -70) quality = 'Good';
+                else if (st.wifi.rssi >= -80) quality = 'Fair';
+                rssiEl.innerText = st.wifi.rssi + ' dBm (' + quality + ')';
+              } else if (st.wifi.is_ap_mode) {
+                rssiEl.innerText = 'N/A (AP Mode)';
+              } else {
+                rssiEl.innerText = 'Disconnected';
+              }
             }
           }
 
-          // Status of Service Container show/hide.
-          const mqttStatusContainer = document.getElementById('mqtt-gateway-status-container');
-          if (mqttStatusContainer) {
-            mqttStatusContainer.style.display = st.gateway_enabled ? 'block' : 'none';
+          // BLE Metrics
+          if (st.ble) {
+            const blePill = document.getElementById('view-ble-status-pill');
+            if (blePill) {
+              if (st.ble.connected) {
+                blePill.innerText = 'Connected';
+                blePill.className = 'status-pill connected';
+              } else {
+                blePill.innerText = 'Disconnected';
+                blePill.className = 'status-pill error';
+              }
+            }
           }
 
-          // Update status pill.
-          const statusPill = document.getElementById('view-mqtt-status-pill');
-          if (statusPill) {
-            statusPill.innerText = st.state || 'Disabled';
-            if (st.state === 'Connected') statusPill.className = 'status-pill connected';
-            else if (st.state === 'Waiting for Radio Config') statusPill.className = 'status-pill waiting';
-            else if (st.state === 'Connecting...') statusPill.className = 'status-pill connecting';
-            else if (st.state === 'Disabled') statusPill.className = 'status-pill disabled';
-            else statusPill.className = 'status-pill error';
+          // MQTT Metrics
+          if (st.mqtt) {
+            const m = st.mqtt;
+            const featureEnabledPill = document.getElementById('view-mqtt-feature-enabled-pill');
+            if (featureEnabledPill) {
+              if (m.gateway_enabled === true) {
+                featureEnabledPill.innerText = 'Enabled';
+                featureEnabledPill.className = 'status-pill connected';
+              } else {
+                featureEnabledPill.innerText = 'Disabled';
+                featureEnabledPill.className = 'status-pill disabled';
+              }
+            }
+
+            const mqttStatusContainer = document.getElementById('mqtt-gateway-status-container');
+            if (mqttStatusContainer) {
+              mqttStatusContainer.style.display = m.gateway_enabled ? 'block' : 'none';
+            }
+
+            const statusPill = document.getElementById('view-mqtt-status-pill');
+            if (statusPill) {
+              statusPill.innerText = m.state || 'Disabled';
+              if (m.state === 'Connected') statusPill.className = 'status-pill connected';
+              else if (m.state === 'Waiting for Radio Config') statusPill.className = 'status-pill waiting';
+              else if (m.state === 'Connecting...') statusPill.className = 'status-pill connecting';
+              else if (m.state === 'Disabled') statusPill.className = 'status-pill disabled';
+              else statusPill.className = 'status-pill error';
+            }
+
+            document.getElementById('view-mqtt-radio-proxy').innerText = m.radio_proxy_enabled ? 'Enabled (Ready)' : (m.radio_server ? 'Disabled on Radio' : '(Waiting for radio)');
+            if (m.active_server) {
+              document.getElementById('view-mqtt-broker').innerText = m.active_server + ':' + m.active_port + (m.active_tls ? ' (TLS)' : '');
+            } else if (m.radio_server) {
+              document.getElementById('view-mqtt-broker').innerText = m.radio_server + ':' + m.radio_port + (m.radio_tls ? ' (TLS)' : '');
+            } else {
+              document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
+            }
+            document.getElementById('view-mqtt-root').innerText = m.active_root || m.radio_root || 'msh';
+            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd / ✖ ' + (m.dropped || 0) + ' dropped';
           }
 
-          document.getElementById('view-mqtt-radio-proxy').innerText = st.radio_proxy_enabled ? 'Enabled (Ready)' : (st.radio_server ? 'Disabled on Radio' : '(Waiting for radio)');
-          if (st.active_server) {
-            document.getElementById('view-mqtt-broker').innerText = st.active_server + ':' + st.active_port + (st.active_tls ? ' (TLS)' : '');
-          } else if (st.radio_server) {
-            document.getElementById('view-mqtt-broker').innerText = st.radio_server + ':' + st.radio_port + (st.radio_tls ? ' (TLS)' : '');
-          } else {
-            document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
+          // System Metrics
+          document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
+          if (st.tcp) {
+            document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3) + ' active';
           }
-          document.getElementById('view-mqtt-root').innerText = st.active_root || st.radio_root || 'msh';
-          document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (st.published || 0) + ' sent / ▼ ' + (st.received || 0) + ' rcvd / ✖ ' + (st.dropped || 0) + ' dropped';
+          if (st.heap) {
+            const freeKb = Math.round(st.heap.free_bytes / 1024);
+            const minKb = Math.round(st.heap.min_free_bytes / 1024);
+            const maxAllocKb = Math.round(st.heap.max_alloc_bytes / 1024);
+            document.getElementById('view-sys-heap').innerText = freeKb + ' KB (Min: ' + minKb + ' KB, MaxBlock: ' + maxAllocKb + ' KB)';
+          }
+          if (st.stacks) {
+            document.getElementById('view-sys-stacks').innerText = 'BLE: ' + (st.stacks.ble_task_free_bytes || 0) + ' B | Net: ' + (st.stacks.net_task_free_bytes || 0) + ' B';
+          }
+
+          // Queues
+          if (st.queues) {
+            if (st.queues.tcp_to_ble) {
+              renderProgressBar('view-queue-t2b-bar', 'view-queue-t2b-text', st.queues.tcp_to_ble.waiting, st.queues.tcp_to_ble.capacity, st.queues.tcp_to_ble.dropped);
+            }
+            if (st.queues.ble_to_tcp) {
+              renderProgressBar('view-queue-b2t-bar', 'view-queue-b2t-text', st.queues.ble_to_tcp.waiting, st.queues.ble_to_tcp.capacity, st.queues.ble_to_tcp.dropped);
+            }
+            if (st.queues.mqtt_to_ble) {
+              renderProgressBar('view-queue-m2b-bar', 'view-queue-m2b-text', st.queues.mqtt_to_ble.waiting, st.queues.mqtt_to_ble.capacity, st.queues.mqtt_to_ble.dropped);
+            }
+          }
         })
         .catch(() => {});
     }
@@ -905,7 +1085,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     window.onload = function() {
       document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
       loadConfig();
-      setInterval(updateMqttStatus, 6000);
+      updateStatus();
+      statusPollTimer = setInterval(updateStatus, 7000);
     };
   </script>
 </body>
@@ -972,10 +1153,95 @@ void config_ui_start_server() {
         request->send(200, "application/json", json);
     });
 
-    // Fetch MQTT live status
-    server.on("/mqtt_status", HTTP_GET, [](AsyncWebServerRequest *request){
-        log_d("[WebUI] GET /mqtt_status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
-        request->send(200, "application/json", mqtt_net_get_status_json());
+    /**
+     * Fetch unified live system, network, queue, and MQTT telemetry status.
+     *
+     * PERFORMANCE / MEMORY CONCURRENCY TRADEOFF NOTE:
+     * This handler gathers diagnostic stats across FreeRTOS tasks and cores in a 100% wait-free manner.
+     * To prevent any possible bridging throughput degradation or fast-path lock contention:
+     * 1. We read atomic scalar values using memory_order_relaxed.
+     * 2. We inspect FreeRTOS queues via non-blocking uxQueueMessagesWaiting.
+     * 3. We inspect task stacks via uxTaskGetStackHighWaterMark without pausing execution.
+     * 4. We do NOT acquire heavy mutex locks (like tcpClientsMutex).
+     * Concession: telemetry values might reflect a slightly staggered snapshot across cores,
+     * which is strongly preferred over stalling live BLE/TCP packet transfers.
+    */
+    server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
+
+        // Uptime in seconds
+        uint32_t uptime = millis() / 1000;
+
+        // Memory statistics
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t minHeap = ESP.getMinFreeHeap();
+        uint32_t maxAlloc = ESP.getMaxAllocHeap();
+
+        // Bridge, Queue & Stack diagnostics
+        BridgeDiagStats bStats = bridge_get_diag_stats();
+
+        // MQTT subsystem status
+        MqttStatus mStats = mqtt_net_get_status();
+
+        // WiFi statistics
+        bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+        bool isAp = wifi_net_is_ap_mode();
+        String ipStr = isAp ? WiFi.softAPIP().toString() : (wifiConnected ? WiFi.localIP().toString() : "0.0.0.0");
+        int8_t rssi = wifiConnected ? WiFi.RSSI() : 0;
+        String mdnsHost = wifi_net_get_mdns_host();
+
+        String json;
+        json.reserve(768);
+
+        json = "{";
+        json += "\"uptime_seconds\":" + String(uptime) + ",";
+        json += "\"heap\":{";
+        json += "\"free_bytes\":" + String(freeHeap) + ",";
+        json += "\"min_free_bytes\":" + String(minHeap) + ",";
+        json += "\"max_alloc_bytes\":" + String(maxAlloc);
+        json += "},";
+        json += "\"wifi\":{";
+        json += "\"connected\":" + String(wifiConnected ? "true" : "false") + ",";
+        json += "\"is_ap_mode\":" + String(isAp ? "true" : "false") + ",";
+        json += "\"ip\":\"" + ipStr + "\",";
+        json += "\"rssi\":" + String((int)rssi) + ",";
+        json += "\"mdns_host\":\"" + utils_escape_json(mdnsHost) + "\"";
+        json += "},";
+        json += "\"ble\":{";
+        json += "\"connected\":" + String(bStats.ble_connected ? "true" : "false");
+        json += "},";
+        json += "\"tcp\":{";
+        json += "\"connected_clients\":" + String(bStats.connected_tcp_clients) + ",";
+        json += "\"max_clients\":" + String(MAX_TCP_CLIENTS);
+        json += "},";
+        json += "\"queues\":{";
+        json += "\"tcp_to_ble\":{\"waiting\":" + String(bStats.tcp_to_ble_waiting) + ",\"capacity\":" + String(bStats.tcp_to_ble_capacity) + ",\"dropped\":" + String(bStats.tcp_to_ble_dropped) + "},";
+        json += "\"ble_to_tcp\":{\"waiting\":" + String(bStats.ble_to_tcp_waiting) + ",\"capacity\":" + String(bStats.ble_to_tcp_capacity) + ",\"dropped\":" + String(bStats.ble_to_tcp_dropped) + "},";
+        json += "\"mqtt_to_ble\":{\"waiting\":" + String(bStats.mqtt_to_ble_waiting) + ",\"capacity\":" + String(bStats.mqtt_to_ble_capacity) + ",\"dropped\":" + String(bStats.mqtt_to_ble_dropped) + "}";
+        json += "},";
+        json += "\"stacks\":{";
+        json += "\"ble_task_free_bytes\":" + String(bStats.ble_task_stack_free_bytes) + ",";
+        json += "\"net_task_free_bytes\":" + String(bStats.net_task_stack_free_bytes);
+        json += "},";
+        json += "\"mqtt\":{";
+        json += "\"gateway_enabled\":" + String(mqtt_net_is_enabled() ? "true" : "false") + ",";
+        json += "\"state\":\"" + utils_escape_json(mStats.state_str) + "\",";
+        json += "\"radio_proxy_enabled\":" + String(mStats.radio_proxy_enabled ? "true" : "false") + ",";
+        json += "\"active_server\":\"" + utils_escape_json(mStats.active_server) + "\",";
+        json += "\"active_port\":" + String(mStats.active_port) + ",";
+        json += "\"active_tls\":" + String(mStats.active_tls ? "true" : "false") + ",";
+        json += "\"active_root\":\"" + utils_escape_json(mStats.active_root) + "\",";
+        json += "\"published\":" + String(mStats.msgs_published) + ",";
+        json += "\"received\":" + String(mStats.msgs_received) + ",";
+        json += "\"dropped\":" + String(mStats.msgs_dropped) + ",";
+        json += "\"radio_server\":\"" + utils_escape_json(mStats.radio_server) + "\",";
+        json += "\"radio_port\":" + String(mStats.radio_port) + ",";
+        json += "\"radio_tls\":" + String(mStats.radio_tls ? "true" : "false") + ",";
+        json += "\"radio_root\":\"" + utils_escape_json(mStats.radio_root) + "\"";
+        json += "}";
+        json += "}";
+
+        request->send(200, "application/json", json);
     });
 
     // Save MQTT configuration
