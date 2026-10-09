@@ -1218,7 +1218,7 @@ void config_ui_start_server() {
         // WiFi statistics
         bool wifiConnected = (WiFi.status() == WL_CONNECTED);
         bool isAp = wifi_net_is_ap_mode();
-        String ipStr = isAp ? WiFi.softAPIP().toString() : (wifiConnected ? WiFi.localIP().toString() : "0.0.0.0");
+        IPAddress ip = isAp ? WiFi.softAPIP() : (wifiConnected ? WiFi.localIP() : IPAddress(0, 0, 0, 0));
         int8_t rssi = wifiConnected ? WiFi.RSSI() : 0;
         const String& mdnsHost = wifi_net_get_mdns_host();
 
@@ -1239,7 +1239,13 @@ void config_ui_start_server() {
         json += ",\"is_ap_mode\":";
         json += (isAp ? "true" : "false");
         json += ",\"ip\":\"";
-        json += ipStr;
+        json += ip[0];
+        json += '.';
+        json += ip[1];
+        json += '.';
+        json += ip[2];
+        json += '.';
+        json += ip[3];
         json += "\",\"rssi\":";
         json += (int)rssi;
         json += ",\"mdns_host\":\"";
