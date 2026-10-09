@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "config_ui.h"
 #include "wifi_net.h"
+#include "mqtt_net.h"
 #include "status_led.h"
 #include "bridge.h"
 #include "build_options.h"
@@ -24,6 +25,9 @@ void setup() {
     // Initial delay waiting for serial to start, USB to connect and catch up.
     delay(2000);
     log_i("\n--- Starting Meshtastic ESP32 BT-TCP Bridge ---");
+
+    // Initialize MQTT subsystem and locks
+    mqtt_net_init();
 
     // Load stored configuration properties from NVS
     config_ui_init();
@@ -90,8 +94,14 @@ void setup() {
             // Start mDNS advertising.
             wifi_net_start_mdns(cfg);
 
+            // Apply saved MQTT configuration
+            MqttConfig mqttCfg;
+            mqttCfg.enabled = cfg.mqtt_enabled;
+            mqttCfg.tls_insecure = cfg.mqtt_tls_insecure;
+            mqttCfg.custom_ca = cfg.mqtt_custom_ca;
+            mqtt_net_apply_config(mqttCfg);
+
             // Start up the captive portal web server.
-            // TODO: Should this be password protected / Optionally enabled?
             config_ui_start_server();
 
             // Init and start bridge BLE <--> WIFI
@@ -110,4 +120,5 @@ void setup() {
 //  Main program loop.
 void loop() {
     wifi_net_loop();
+    mqtt_net_loop();
 }

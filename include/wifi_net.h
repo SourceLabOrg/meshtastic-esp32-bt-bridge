@@ -1,12 +1,12 @@
 #pragma once
 
 #include <Arduino.h>
-
-#include "config_ui.h" // For BridgeConfig
+#include "config_ui.h"
 
 bool wifi_net_connect_sta(const String& ssid, const String& pass);
 void wifi_net_start_mdns(const BridgeConfig& cfg);
 void wifi_net_start_ap();
+bool wifi_net_is_ap_mode();
 void wifi_net_loop();
 
 // WiFi scanning for captive portal configuration

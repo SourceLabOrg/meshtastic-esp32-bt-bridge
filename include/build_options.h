@@ -55,6 +55,11 @@
 #define BLUETOOTH_TIMEOUT_SECONDS 8
 #endif
 
+// Bluetooth Reconnect Delay time, in milliseconds
+#ifndef BLUETOOTH_RECONNECT_DELAY_MS
+#define BLUETOOTH_RECONNECT_DELAY_MS 5000
+#endif
+
 // Bluetooth Scan Timeout in seconds
 #ifndef BLUETOOTH_SCAN_TIME_SECONDS
 #define BLUETOOTH_SCAN_TIME_SECONDS 4
@@ -76,9 +81,47 @@
 // -----------------------------------------
 // Bridge Settings
 // -----------------------------------------
+// Maximum binary packet size for Meshtastic ToRadio envelopes (512B payload + topic/metadata headers).
+#ifndef MESHTASTIC_MAX_PACKET_SIZE
+#define MESHTASTIC_MAX_PACKET_SIZE 576
+#endif
+
 // Size of message queues between BLE <--> TCP Connections.
 #ifndef BRIDGE_QUEUE_SIZE
-#define BRIDGE_QUEUE_SIZE 100
+#define BRIDGE_QUEUE_SIZE 32
+#endif
+
+// -----------------------------------------
+// MQTT Gateway Settings
+// -----------------------------------------
+// Capacity of static MQTT downlink packet buffer queue.
+#ifndef MQTT_QUEUE_SIZE
+#define MQTT_QUEUE_SIZE 16
+#endif
+
+// Duration (in seconds) to keep MQTT broker connected during transient Bluetooth drops.
+#ifndef MQTT_BLE_GRACE_PERIOD_SECONDS
+#define MQTT_BLE_GRACE_PERIOD_SECONDS 60
+#endif
+
+// Underlying MQTT Client Keepalive setting, in seconds.
+#ifndef MQTT_CLIENT_KEEPALIVE_SECONDS
+#define MQTT_CLIENT_KEEPALIVE_SECONDS 60
+#endif
+
+// On disconnect from a broker, after how long will it attempt to reconnect, in milliseconds.
+#ifndef MQTT_RECONNECT_TIME_MS
+#define MQTT_RECONNECT_TIME_MS 15000
+#endif
+
+// Internal MQTT client buffer size
+#ifndef MQTT_CLIENT_BUFFER_SIZE
+#define MQTT_CLIENT_BUFFER_SIZE 2048
+#endif
+
+// Maximum allowable length for custom CA root certificate in PEM format (NVS limit is 4000)
+#ifndef MQTT_MAX_CUSTOM_CA_LENGTH
+#define MQTT_MAX_CUSTOM_CA_LENGTH 3500
 #endif
 
 // -----------------------------------------

@@ -4,14 +4,22 @@ This project is built using **PlatformIO**. Because you are using IntelliJ on ma
 
 *(Note: While we have a Docker DevContainer for pure compiling, flashing a USB device from inside a Docker container on macOS is notoriously difficult due to USB passthrough limitations. Therefore, a local installation of the CLI is highly recommended).*
 
-## 1. Install PlatformIO Core (macOS)
-You can install the PlatformIO CLI locally on your Mac using Homebrew. 
-
-Open your terminal and run:
+## 1. Prerequisites (macOS)
+You can install the PlatformIO CLI locally on your Mac using Homebrew:
 ```bash
 brew install platformio
 ```
 *(Alternatively, if you use Python, you can run `pip install platformio`)*
+
+### Protobuf & Submodule Setup
+This project uses the official Meshtastic Protobufs submodule and Nanopb. Ensure submodules are checked out and the required Python tools are installed:
+```bash
+# Initialize and fetch git submodules
+git submodule update --init --recursive
+
+# Install required Python protobuf generation packages
+pip install protobuf grpcio-tools
+```
 
 Verify the installation by running:
 ```bash
@@ -87,7 +95,36 @@ build_flags =
 - `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration. (Default: `4`).
 - `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to keep in memory from discovery scan. (Default: `60`).
 - `WIFI_MAX_NETWORKS_DISCOVERABLE`: Maximum number of WiFi networks to keep in memory from discovery scan. (Default: `30`).
-- `BRIDGE_QUEUE_SIZE`: Size of the FreeRTOS message queues between BLE and TCP tasks. (Default: `100`).
+- `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `32`).
+- `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `16`).
+
+### Static FreeRTOS Queues & RAM Sizing Math
+All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, and `mqtt_to_ble_queue`) are statically allocated in the `.bss` segment using `xQueueCreateStatic` to prevent runtime dynamic heap fragmentation and eliminate Out-Of-Memory crashes.
+
+Each `BridgePacket` holds a 576-byte payload plus length metadata ($\approx 584\text{ bytes}$).
+
+#### Unified Sane Sizing Across All ESP32 & ESP32-S3 Targets
+* **Queue Allocations:**
+  - `tcp_to_ble_queue`: $32 \text{ packets} \times 584\text{ B} = 18.7\text{ KB}$
+  - `ble_to_tcp_queue`: $32 \text{ packets} \times 584\text{ B} = 18.7\text{ KB}$
+  - `mqtt_to_ble_queue`: $16 \text{ packets} \times 584\text{ B} = 9.3\text{ KB}$
+  - **Total Static Queue RAM:** $\approx 46.7\text{ KB}$ in `.bss`.
+* **Runtime Free Heap Footprint:**
+  - **Seeed XIAO ESP32-S3:** **~106 KB free heap** (Min: ~88 KB, MaxBlock: ~95 KB).
+  - **Classic ESP32 (`esp32dev`):** **~95 KB free heap** (Min: ~78 KB, MaxBlock: ~80 KB).
+* **Why This Matters:** LwIP networking, AsyncWebServer, and MbedTLS require ~15 KB of contiguous free memory. Sizing the queues to 32/16 ensures $>5\times$ safety margin on all targets without risking memory exhaustion or socket starvation.
+
+### Task Prioritization & Multithreading Architecture
+To prevent high-bandwidth network traffic from starving BLE operations or locking up the WebUI:
+
+| Task Name | Core | Priority | Stack Size | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| **`LwIP / TCP Stack`** | Core 0 | **18** | System | Internal ESP-IDF IP/MAC networking stack |
+| **`AsyncTCP Worker`** | Core 0 | **3** | System | Handles async socket read/write events and WebUI endpoints |
+| **`mqtt_client` Task** | Core 0 | **2** | 8192 B | Background MQTT networking and TLS processing |
+| **`bridgeNetTask`** | Core 0 | **1** | 4096 B | Network broadcast task (drains `ble_to_tcp_queue` to TCP sockets) |
+| **`diag_telemetry`** | Core 0 | **1** | 3072 B | Periodic diagnostic task (15s interval) |
+| **`bridgeBleTask`** | Core 1 | **1** | 8192 B | BLE Engine (polls `FromRadio`, handles `FromNum`, writes to `ToRadio`) |
 
 ---
 ## 7. Logging & Debugging
@@ -113,7 +150,49 @@ To achieve a clean console while preserving our own debug logs, we use the follo
 - **Bluetooth (NimBLE) Logs:** NimBLE is configured via its own flag in `platformio.ini`. We currently set `-D CONFIG_NIMBLE_CPP_LOG_LEVEL=2` (Warning) to keep it quiet. You can increase this to `4` (Debug) if you need to debug raw GATT characteristics.
 
 ---
-## 8. Releasing a New Version
+## 8. TLS Root Certificate Authority (CA) Bundle Pipeline
+
+To support secure MQTTS connections to any public broker (such as `mqtt.meshtastic.org:8883` using Let's Encrypt, or AWS IoT, HiveMQ, EMQX, etc.) without hardcoding static server certificates, the project embeds a compact, pre-compiled Mozilla Root CA bundle.
+
+### How it Works
+1. **Pre-Compiled Bundle (`data/cert/x509_crt_bundle.bin`):** Contains ~130+ standard trusted root CA certificates compressed into a binary format (subject names + public keys only, ~86 KB total).
+2. **PlatformIO Embedding:** Configured in `platformio.ini` via:
+   ```ini
+   board_build.embed_files = data/cert/x509_crt_bundle.bin
+   ```
+   During compilation, the linker exposes the binary start symbol `_binary_data_cert_x509_crt_bundle_bin_start`.
+3. **Runtime Initialization:** On boot, `mqtt_net_init()` invokes:
+   ```cpp
+   extern const uint8_t rootca_crt_bundle_start[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
+   arduino_esp_crt_bundle_set(rootca_crt_bundle_start);
+   ```
+4. **Binary Search Verification:** When a TLS connection is opened, mbedTLS uses binary search against the embedded flash memory to verify server certificate chains with minimal RAM overhead.
+5. **Self-Signed / Insecure Bypass:** When the "Skip Certificate Validation" toggle is enabled in the WebUI, the bridge attaches a custom handler that sets `MBEDTLS_SSL_VERIFY_NONE` and skips hostname verification, allowing local LAN brokers and self-signed certificates.
+
+### Updating the CA Bundle
+Root CA certificates change very infrequently (with 15–30 year validity windows), but the bundle can be refreshed at any time directly from the official Mozilla / cURL certificate store:
+
+```bash
+# 1. Create a temporary Python virtual environment with cryptography
+python3 -m venv /tmp/ca_env
+/tmp/ca_env/bin/pip install cryptography --quiet
+
+# 2. Download Espressif's standalone bundle generator and the latest Mozilla CA store
+curl -s https://raw.githubusercontent.com/espressif/esp-idf/release/v5.1/components/mbedtls/esp_crt_bundle/gen_crt_bundle.py -o /tmp/gen_crt_bundle.py
+curl -s https://curl.se/ca/cacert.pem -o /tmp/cacert.pem
+
+# 3. Generate the compact binary bundle and move to data/cert/
+/tmp/ca_env/bin/python /tmp/gen_crt_bundle.py -i /tmp/cacert.pem
+mv x509_crt_bundle data/cert/x509_crt_bundle.bin
+
+# 4. Clean up temporary files
+rm -rf /tmp/ca_env /tmp/gen_crt_bundle.py /tmp/cacert.pem
+```
+
+*Note: Make sure to commit the updated `data/cert/x509_crt_bundle.bin` to Git so CI/CD and other developers compile with the new certificate store.*
+
+---
+## 9. Releasing a New Version
 
 The project is fully automated using GitHub Actions. To release a new firmware version, you **do not** need to manually compile or upload binaries. 
 
