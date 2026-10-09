@@ -31,7 +31,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Displays **Memory (Heap)** stats: Free Heap, Minimum Recorded Free Heap, and Maximum Allocatable Block in KB.
   * Displays **Free Task Stacks** high-water mark headroom for `bridge_ble` and `bridge_net` tasks.
   * Displays **Queue Buffers**: Visual color-coded capacity progress bars (`< 50%` Green, `50-80%` Yellow, `> 80%` Red), message counts (`waiting / capacity`), and drop counters for `TCP ➔ BLE`, `BLE ➔ TCP`, and `MQTT ➔ BLE` queues.
-  * Contains a toggle for **Live Telemetry Polling (7s)** (defaults to enabled, allowing user to pause/resume live updates).
+  * Contains a toggle for **Live Telemetry Polling (7s)** (enabled by default, with dynamic 7s ➔ 3s ➔ 1s rate cycling via the <kbd>P</kbd> key).
   * Contains a toggle for **Enable Serial Debug Logs**.
   * Contains a **Reboot & Start Bridge** action that restarts the ESP32 into normal runtime mode.
   * Contains a **Reset All Settings** action (with confirmation dialog) that clears all stored NVS credentials and restarts into Setup Mode.
@@ -90,7 +90,13 @@ The following keys are stored in the `Preferences` namespace (`bridge_cfg`):
 * `mqtt_custom_ca` (String)
 
 ## Technical Decisions & Considerations
+* **Captive Portal / WebView Compatibility Constraints (macOS / iOS CNA & Windows):**
+  * The WebUI is frequently opened inside constrained OS Captive Portal WebViews (e.g. Apple's Captive Network Assistant `CaptiveNetworkSupport`, Windows Captive Portal, Android CaptivePortalLogin).
+  * **No Native `window.alert()` / `window.confirm()` / `window.prompt()`:** Many OS captive browser engines completely suppress, ignore, or hang on native browser dialogs. All notifications, alerts, and confirmation dialogs must use **custom in-DOM HTML/CSS modals** (e.g., `#modal-overlay`, `.alert-box`) rather than native JavaScript dialogs.
+  * **Self-Contained Offline Assets:** In AP Setup mode, the client device has no upstream internet access. The UI must never reference external CDN scripts, CSS files, or web fonts; all CSS, SVGs, HTML, and JavaScript must be entirely self-contained within `PROGMEM` flash memory.
+  * **No External Navigation / New Tabs:** Popups or links targeting `_blank` may be blocked or forcibly close the CNA window.
+  * **Stateless Client Session:** OS captive popups often discard cookies and `localStorage` when closed; all state must reside in ESP32 NVS or be queried dynamically from `/config` and `/status`.
 * **Zero-Heap PROGMEM Serving:** The main web UI HTML payload is streamed directly out of flash memory via `AsyncProgmemResponse`, eliminating the ~35 KB temporary heap spike when serving web clients.
-* **Client-Side Polling:** Telemetry endpoints like `/mqtt_status` are polled every 6 seconds to maintain live stats (including published, received, and dropped counts) while minimizing network traffic and CPU load.
+* **Client-Side Polling:** The unified `/status` endpoint is polled periodically (defaulting to 7s, dynamically adjustable to 3s or 1s via the <kbd>P</kbd> key) using chained asynchronous requests to maintain real-time telemetry while completely avoiding request stacking and minimizing CPU/network overhead.
 * **Radio Concurrency:** The ESP32 shares a single 2.4GHz radio antenna for WiFi and Bluetooth. Using `ESPAsyncWebServer` combined with asynchronous background tasks for BLE operations prevents HTTP request timeouts and prevents radio collisions while switching between WiFi AP and BLE scanning/testing.
 * **NimBLE Stack:** `NimBLE-Arduino` provides low memory footprint BLE client capabilities, essential for coexisting with `ESPAsyncWebServer` and `WiFi` on resource-constrained ESP32-S3 boards without heap exhaustion.
