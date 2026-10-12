@@ -92,7 +92,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     // Only update the tcpClients list after grabbing the mutex
     if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
         tcpClients.push_back(ctx);
-        connectedClientsCount++;
+        connectedClientsCount.fetch_add(1, std::memory_order_relaxed);
         xSemaphoreGive(tcpClientsMutex);
     }
 
@@ -170,7 +170,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
             auto it = std::find(tcpClients.begin(), tcpClients.end(), ctx);
             if (it != tcpClients.end()) {
                 tcpClients.erase(it);
-                connectedClientsCount--;
+                connectedClientsCount.fetch_sub(1, std::memory_order_relaxed);
             }
             xSemaphoreGive(tcpClientsMutex);
         }
