@@ -35,8 +35,8 @@ During the design and implementation of this feature, every decision is evaluate
 To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_status` endpoint is replaced by a single, consolidated `GET /status` endpoint.
 
 * **Single HTTP Request Per Interval**: Eliminates multiple polling timers, reducing TCP handshakes and preserving ESPAsyncWebServer / LwIP memory.
-* **Atomic Telemetry Snapshot**: Samples heap, WiFi, BLE, TCP clients, queue occupancies, and MQTT proxy state in a single tick.
-* **Zero Heap Fragmentation**: Response JSON is built with zero intermediate heap allocations into a single pre-reserved buffer (`json.reserve(1024)`).
+* **Atomic Telemetry Snapshot**: Sourced from `diag_telemetry_get_snapshot()`, sampling heap, WiFi, BLE, TCP clients, queue occupancies, and MQTT proxy state in a single tick.
+* **Zero Heap Fragmentation (Streaming Response)**: Response JSON is streamed chunk-by-chunk directly into lwIP network output buffers via `AsyncResponseStream` and `utils_escape_json_print()`, eliminating intermediate heap allocations and string duplication.
 * **Polling Strategy**:
   * Default Interval: **7 seconds**.
   * **Dynamic Rate Adjustment**: Pressing the <kbd>P</kbd> or <kbd>p</kbd> key anywhere in the WebUI cycles the polling frequency dynamically between **7s ➔ 3s ➔ 1s**, updating the timer and UI label immediately without full page reload.
@@ -59,11 +59,34 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
     "mdns_host": "dsc-ae28.local"
   },
   "ble": {
-    "connected": true
+    "connected": true,
+    "rx_count": 42,
+    "tx_count": 38,
+    "invalid_count": 0
   },
   "tcp": {
     "connected_clients": 1,
-    "max_clients": 3
+    "max_clients": 3,
+    "rx_count": 38,
+    "tx_count": 42,
+    "invalid_count": 0
+  },
+  "traffic": {
+    "ble": {
+      "rx": 42,
+      "tx": 38,
+      "invalid": 0
+    },
+    "tcp": {
+      "rx": 38,
+      "tx": 42,
+      "invalid": 0
+    },
+    "mqtt": {
+      "rx": 15,
+      "tx": 10,
+      "invalid": 0
+    }
   },
   "queues": {
     "tcp_to_ble": {
@@ -94,9 +117,14 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
     "active_port": 8883,
     "active_tls": true,
     "active_root": "msh",
-    "published": 14,
-    "received": 22,
-    "dropped": 0
+    "published": 10,
+    "received": 15,
+    "dropped": 0,
+    "invalid": 0,
+    "radio_server": "mqtt.example.com",
+    "radio_port": 8883,
+    "radio_tls": true,
+    "radio_root": "msh"
   }
 }
 ```
@@ -165,3 +193,6 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
 * **Decision 1 (Oct 9, 2026):** Consolidated `/mqtt_status` into `GET /status` to cut HTTP polling frequency in half and save Core 0 CPU/heap.
 * **Decision 2 (Oct 9, 2026):** Set live polling default to **Enabled** at a 7-second interval so MQTT telemetry and queue diagnostics stay live out of the box, with a pause toggle in the UI.
 * **Decision 3 (Oct 9, 2026):** Concurrency, Memory Safety & Throughput Concession: Diagnostics endpoint `/status` reads cross-core telemetry in a 100% wait-free manner using atomic operations (`std::memory_order_relaxed`) and non-blocking FreeRTOS inspector functions (`uxQueueMessagesWaiting`, `uxTaskGetStackHighWaterMark`). We intentionally avoid acquiring heavy locks (like `tcpClientsMutex`) in the webserver thread, preferring slightly staggered/sampled telemetry snapshots over any potential bridging throughput stalls.
+* **Decision 4 (Oct 12, 2026):** Streamed JSON via `AsyncResponseStream`: Replaced `String` heap allocations on `/status` and `/config` with chunked streaming directly to lwIP packet buffers via `utils_escape_json_print()`, eliminating temporary multi-kilobyte heap duplication and memory fragmentation.
+* **Decision 5 (Oct 12, 2026):** Prometheus Metrics Integration: Built standards-compliant `GET /metrics` OpenMetrics exporter sharing the exact same `SystemTelemetrySnapshot` model and lock-free counters as `/status` and serial diagnostics.
+
