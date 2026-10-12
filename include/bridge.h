@@ -21,6 +21,12 @@ struct BridgeDiagStats {
     uint32_t ble_task_stack_free_bytes;
     uint32_t net_task_stack_free_bytes;
     bool ble_connected;
+    uint32_t ble_rx_count;
+    uint32_t ble_tx_count;
+    uint32_t ble_invalid_count;
+    uint32_t tcp_rx_count;
+    uint32_t tcp_tx_count;
+    uint32_t tcp_invalid_count;
 };
 
 BridgeDiagStats bridge_get_diag_stats();

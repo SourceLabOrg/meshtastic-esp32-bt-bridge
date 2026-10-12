@@ -7,6 +7,7 @@
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include "build_options.h"
+#include "diag_telemetry.h"
 #include "utils.h"
 #include "esp_log.h"
 
@@ -166,6 +167,10 @@ const char index_html[] PROGMEM = R"rawliteral(
         <span class="info-label">Connection:</span>
         <span class="info-val"><span id="view-ble-status-pill" class="status-pill waiting">Unknown</span></span>
       </div>
+      <div class="info-row">
+        <span class="info-label">Traffic:</span>
+        <span class="info-val" id="view-ble-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+      </div>
     </div>
     <div id="ble-edit" style="display:none;">
       <label>Discovered Devices:</label>
@@ -294,6 +299,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="info-row">
       <span class="info-label">TCP Clients:</span>
       <span class="info-val" id="view-sys-tcp-clients">Loading...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">TCP Traffic:</span>
+      <span class="info-val" id="view-sys-tcp-traffic">▲ 0 sent / ▼ 0 rcvd</span>
     </div>
     <div class="info-row">
       <span class="info-label">Free Heap:</span>
@@ -600,6 +609,10 @@ const char index_html[] PROGMEM = R"rawliteral(
                 blePill.className = 'status-pill error';
               }
             }
+            const bleTraffic = document.getElementById('view-ble-traffic');
+            if (bleTraffic) {
+              bleTraffic.innerText = '▲ ' + (st.ble.tx_count || 0) + ' sent / ▼ ' + (st.ble.rx_count || 0) + ' rcvd' + (st.ble.invalid_count ? (' · ' + st.ble.invalid_count + ' invalid') : '');
+            }
           }
 
           // MQTT Metrics
@@ -640,13 +653,17 @@ const char index_html[] PROGMEM = R"rawliteral(
               document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
             }
             document.getElementById('view-mqtt-root').innerText = m.active_root || m.radio_root || 'msh';
-            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd';
+            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd' + (m.invalid ? (' · ' + m.invalid + ' invalid') : '');
           }
 
           // System Metrics
           document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
           if (st.tcp) {
             document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3);
+            const tcpTraffic = document.getElementById('view-sys-tcp-traffic');
+            if (tcpTraffic) {
+              tcpTraffic.innerText = '▲ ' + (st.tcp.tx_count || 0) + ' sent / ▼ ' + (st.tcp.rx_count || 0) + ' rcvd' + (st.tcp.invalid_count ? (' · ' + st.tcp.invalid_count + ' invalid') : '');
+            }
           }
           if (st.heap) {
             const freeKb = Math.round(st.heap.free_bytes / 1024);
@@ -1238,114 +1255,25 @@ void config_ui_start_server() {
     server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
         log_d("[WebUI] GET /status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
 
-        // Uptime in seconds
-        uint32_t uptime = millis() / 1000;
-
-        // Memory statistics
-        uint32_t freeHeap = ESP.getFreeHeap();
-        uint32_t minHeap = ESP.getMinFreeHeap();
-        uint32_t maxAlloc = ESP.getMaxAllocHeap();
-
-        // Bridge, Queue & Stack diagnostics
-        BridgeDiagStats bStats = bridge_get_diag_stats();
-
-        // MQTT subsystem status
-        MqttStatus mStats = mqtt_net_get_status();
-
-        // WiFi statistics
-        bool wifiConnected = (WiFi.status() == WL_CONNECTED);
-        bool isAp = wifi_net_is_ap_mode();
-        IPAddress ip = isAp ? WiFi.softAPIP() : (wifiConnected ? WiFi.localIP() : IPAddress(0, 0, 0, 0));
-        int8_t rssi = wifiConnected ? WiFi.RSSI() : 0;
-        const String& mdnsHost = wifi_net_get_mdns_host();
-
-        // Construct response JSON with zero intermediate heap allocations into a single pre-reserved buffer
+        SystemTelemetrySnapshot snapshot = diag_telemetry_get_snapshot();
         String json;
-        json.reserve(1024);
-
-        json = "{\"uptime_seconds\":";
-        json += uptime;
-        json += ",\"heap\":{\"free_bytes\":";
-        json += freeHeap;
-        json += ",\"min_free_bytes\":";
-        json += minHeap;
-        json += ",\"max_alloc_bytes\":";
-        json += maxAlloc;
-        json += "},\"wifi\":{\"connected\":";
-        json += (wifiConnected ? "true" : "false");
-        json += ",\"is_ap_mode\":";
-        json += (isAp ? "true" : "false");
-        json += ",\"ip\":\"";
-        json += ip[0];
-        json += '.';
-        json += ip[1];
-        json += '.';
-        json += ip[2];
-        json += '.';
-        json += ip[3];
-        json += "\",\"rssi\":";
-        json += (int)rssi;
-        json += ",\"mdns_host\":\"";
-        utils_escape_json_append(json, mdnsHost);
-        json += "\"},\"ble\":{\"connected\":";
-        json += (bStats.ble_connected ? "true" : "false");
-        json += "},\"tcp\":{\"connected_clients\":";
-        json += bStats.connected_tcp_clients;
-        json += ",\"max_clients\":";
-        json += MAX_TCP_CLIENTS;
-        json += "},\"queues\":{\"tcp_to_ble\":{\"waiting\":";
-        json += bStats.tcp_to_ble_waiting;
-        json += ",\"capacity\":";
-        json += bStats.tcp_to_ble_capacity;
-        json += ",\"dropped\":";
-        json += bStats.tcp_to_ble_dropped;
-        json += "},\"ble_to_tcp\":{\"waiting\":";
-        json += bStats.ble_to_tcp_waiting;
-        json += ",\"capacity\":";
-        json += bStats.ble_to_tcp_capacity;
-        json += ",\"dropped\":";
-        json += bStats.ble_to_tcp_dropped;
-        json += "},\"mqtt_to_ble\":{\"waiting\":";
-        json += bStats.mqtt_to_ble_waiting;
-        json += ",\"capacity\":";
-        json += bStats.mqtt_to_ble_capacity;
-        json += ",\"dropped\":";
-        json += bStats.mqtt_to_ble_dropped;
-        json += "}},\"stacks\":{\"ble_task_free_bytes\":";
-        json += bStats.ble_task_stack_free_bytes;
-        json += ",\"net_task_free_bytes\":";
-        json += bStats.net_task_stack_free_bytes;
-        json += "},\"mqtt\":{\"gateway_enabled\":";
-        json += (mqtt_net_is_enabled() ? "true" : "false");
-        json += ",\"state\":\"";
-        utils_escape_json_append(json, mStats.state_str);
-        json += "\",\"radio_proxy_enabled\":";
-        json += (mStats.radio_proxy_enabled ? "true" : "false");
-        json += ",\"active_server\":\"";
-        utils_escape_json_append(json, mStats.active_server);
-        json += "\",\"active_port\":";
-        json += mStats.active_port;
-        json += ",\"active_tls\":";
-        json += (mStats.active_tls ? "true" : "false");
-        json += ",\"active_root\":\"";
-        utils_escape_json_append(json, mStats.active_root);
-        json += "\",\"published\":";
-        json += mStats.msgs_published;
-        json += ",\"received\":";
-        json += mStats.msgs_received;
-        json += ",\"dropped\":";
-        json += mStats.msgs_dropped;
-        json += ",\"radio_server\":\"";
-        utils_escape_json_append(json, mStats.radio_server);
-        json += "\",\"radio_port\":";
-        json += mStats.radio_port;
-        json += ",\"radio_tls\":";
-        json += (mStats.radio_tls ? "true" : "false");
-        json += ",\"radio_root\":\"";
-        utils_escape_json_append(json, mStats.radio_root);
-        json += "\"}}";
+        diag_telemetry_format_json(snapshot, json);
 
         request->send(200, "application/json", json);
+    });
+
+    /**
+     * Standards-compliant Prometheus / OpenMetrics scraping endpoint.
+     * Uses AsyncResponseStream to stream metrics chunk-by-chunk directly into lwIP
+     * network output buffers with zero large contiguous heap allocations.
+     */
+    server.on("/metrics", HTTP_GET, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] GET /metrics requested (Client: %s)", request->client()->remoteIP().toString().c_str());
+
+        SystemTelemetrySnapshot snapshot = diag_telemetry_get_snapshot();
+        AsyncResponseStream *response = request->beginResponseStream("text/plain; version=0.0.4; charset=utf-8");
+        diag_telemetry_format_prometheus(snapshot, *response);
+        request->send(response);
     });
 
     // Save MQTT configuration
