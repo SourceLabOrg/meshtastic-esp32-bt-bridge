@@ -124,6 +124,14 @@ const char index_html[] PROGMEM = R"rawliteral(
         <span class="info-label">Signal (RSSI):</span>
         <span class="info-val" id="view-wifi-rssi">Loading...</span>
       </div>
+      <div class="info-row">
+        <span class="info-label">TCP Clients:</span>
+        <span class="info-val" id="view-sys-tcp-clients">Loading...</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Traffic:</span>
+        <span class="info-val">▲ <span id="view-tcp-tx">0</span> sent / ▼ <span id="view-tcp-rx">0</span> rcvd · <span id="view-tcp-inv">0</span> invalid</span>
+      </div>
     </div>
     <div id="wifi-edit" style="display:none;">
       <label>Discovered Networks:</label>
@@ -295,14 +303,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="info-row">
       <span class="info-label">Uptime:</span>
       <span class="info-val" id="view-sys-uptime">Loading...</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">TCP Clients:</span>
-      <span class="info-val" id="view-sys-tcp-clients">Loading...</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">TCP Traffic:</span>
-      <span class="info-val">▲ <span id="view-tcp-tx">0</span> sent / ▼ <span id="view-tcp-rx">0</span> rcvd · <span id="view-tcp-inv">0</span> invalid</span>
     </div>
     <div class="info-row">
       <span class="info-label">Free Heap:</span>
@@ -663,8 +663,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             if (mqttInv) mqttInv.innerText = m.invalid || 0;
           }
 
-          // System Metrics
-          document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
+          // WiFi & TCP Metrics
           if (st.tcp) {
             document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3);
             const tcpTx = document.getElementById('view-tcp-tx');
@@ -674,6 +673,9 @@ const char index_html[] PROGMEM = R"rawliteral(
             const tcpInv = document.getElementById('view-tcp-inv');
             if (tcpInv) tcpInv.innerText = st.tcp.invalid_count || 0;
           }
+
+          // System Metrics
+          document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
           if (st.heap) {
             const freeKb = Math.round(st.heap.free_bytes / 1024);
             const minKb = Math.round(st.heap.min_free_bytes / 1024);
