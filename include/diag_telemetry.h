@@ -44,9 +44,9 @@ void diag_telemetry_format_serial(const SystemTelemetrySnapshot& s, char* buf, s
 
 /**
  * Formats diagnostic telemetry into a JSON payload for GET /status.
- * Pre-reserves buffer capacity to prevent heap fragmentation.
+ * Streams directly into Print& (e.g. AsyncResponseStream) without large heap allocations.
  */
-void diag_telemetry_format_json(const SystemTelemetrySnapshot& s, String& jsonOut);
+void diag_telemetry_format_json(const SystemTelemetrySnapshot& s, Print& out);
 
 /**
  * Formats diagnostic telemetry into Prometheus text format 0.0.4.

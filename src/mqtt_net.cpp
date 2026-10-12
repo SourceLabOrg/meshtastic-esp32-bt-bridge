@@ -28,12 +28,7 @@ static std::atomic<bool> s_mqtt_enabled{false};
  */
 static std::atomic<uint32_t> s_msgs_published{0};
 static std::atomic<uint32_t> s_msgs_received{0};
-static std::atomic<uint32_t> s_msgs_dropped{0};
 static std::atomic<uint32_t> s_msgs_invalid{0};
-
-void mqtt_net_record_dropped() {
-    s_msgs_dropped.fetch_add(1, std::memory_order_relaxed);
-}
 
 void mqtt_net_record_invalid() {
     s_msgs_invalid.fetch_add(1, std::memory_order_relaxed);
@@ -790,7 +785,6 @@ MqttStatus mqtt_net_get_status() {
     }
     st.msgs_published = s_msgs_published.load(std::memory_order_relaxed);
     st.msgs_received = s_msgs_received.load(std::memory_order_relaxed);
-    st.msgs_dropped = s_msgs_dropped.load(std::memory_order_relaxed);
     st.msgs_invalid = s_msgs_invalid.load(std::memory_order_relaxed);
     return st;
 }

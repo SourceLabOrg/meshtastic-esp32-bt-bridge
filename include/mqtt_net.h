@@ -46,15 +46,9 @@ struct MqttStatus {
     // Counters/State.
     uint32_t msgs_published = 0;
     uint32_t msgs_received = 0;
-    uint32_t msgs_dropped = 0;
     uint32_t msgs_invalid = 0;
     String last_error = "";
 };
-
-/**
- * Record a dropped MQTT downlink message (e.g. queue overflow).
- */
-void mqtt_net_record_dropped();
 
 /**
  * Record an invalid or unparseable MQTT downlink message (e.g. oversized topic/payload, protobuf error).

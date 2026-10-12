@@ -169,7 +169,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
       <div class="info-row">
         <span class="info-label">Traffic:</span>
-        <span class="info-val" id="view-ble-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+        <span class="info-val">▲ <span id="view-ble-tx">0</span> sent / ▼ <span id="view-ble-rx">0</span> rcvd · <span id="view-ble-inv">0</span> invalid</span>
       </div>
     </div>
     <div id="ble-edit" style="display:none;">
@@ -232,7 +232,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         </div>
         <div class="info-row">
           <span class="info-label">Traffic:</span>
-          <span class="info-val" id="view-mqtt-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+          <span class="info-val">▲ <span id="view-mqtt-tx">0</span> sent / ▼ <span id="view-mqtt-rx">0</span> rcvd · <span id="view-mqtt-inv">0</span> invalid</span>
         </div>
       </div>
     </div>
@@ -302,7 +302,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div class="info-row">
       <span class="info-label">TCP Traffic:</span>
-      <span class="info-val" id="view-sys-tcp-traffic">▲ 0 sent / ▼ 0 rcvd</span>
+      <span class="info-val">▲ <span id="view-tcp-tx">0</span> sent / ▼ <span id="view-tcp-rx">0</span> rcvd · <span id="view-tcp-inv">0</span> invalid</span>
     </div>
     <div class="info-row">
       <span class="info-label">Free Heap:</span>
@@ -609,10 +609,12 @@ const char index_html[] PROGMEM = R"rawliteral(
                 blePill.className = 'status-pill error';
               }
             }
-            const bleTraffic = document.getElementById('view-ble-traffic');
-            if (bleTraffic) {
-              bleTraffic.innerText = '▲ ' + (st.ble.tx_count || 0) + ' sent / ▼ ' + (st.ble.rx_count || 0) + ' rcvd' + (st.ble.invalid_count ? (' · ' + st.ble.invalid_count + ' invalid') : '');
-            }
+            const bleTx = document.getElementById('view-ble-tx');
+            if (bleTx) bleTx.innerText = st.ble.tx_count || 0;
+            const bleRx = document.getElementById('view-ble-rx');
+            if (bleRx) bleRx.innerText = st.ble.rx_count || 0;
+            const bleInv = document.getElementById('view-ble-inv');
+            if (bleInv) bleInv.innerText = st.ble.invalid_count || 0;
           }
 
           // MQTT Metrics
@@ -653,17 +655,24 @@ const char index_html[] PROGMEM = R"rawliteral(
               document.getElementById('view-mqtt-broker').innerText = '(Waiting for radio)';
             }
             document.getElementById('view-mqtt-root').innerText = m.active_root || m.radio_root || 'msh';
-            document.getElementById('view-mqtt-traffic').innerText = '▲ ' + (m.published || 0) + ' sent / ▼ ' + (m.received || 0) + ' rcvd' + (m.invalid ? (' · ' + m.invalid + ' invalid') : '');
+            const mqttTx = document.getElementById('view-mqtt-tx');
+            if (mqttTx) mqttTx.innerText = m.published || 0;
+            const mqttRx = document.getElementById('view-mqtt-rx');
+            if (mqttRx) mqttRx.innerText = m.received || 0;
+            const mqttInv = document.getElementById('view-mqtt-inv');
+            if (mqttInv) mqttInv.innerText = m.invalid || 0;
           }
 
           // System Metrics
           document.getElementById('view-sys-uptime').innerText = formatUptime(st.uptime_seconds);
           if (st.tcp) {
             document.getElementById('view-sys-tcp-clients').innerText = (st.tcp.connected_clients || 0) + ' / ' + (st.tcp.max_clients || 3);
-            const tcpTraffic = document.getElementById('view-sys-tcp-traffic');
-            if (tcpTraffic) {
-              tcpTraffic.innerText = '▲ ' + (st.tcp.tx_count || 0) + ' sent / ▼ ' + (st.tcp.rx_count || 0) + ' rcvd' + (st.tcp.invalid_count ? (' · ' + st.tcp.invalid_count + ' invalid') : '');
-            }
+            const tcpTx = document.getElementById('view-tcp-tx');
+            if (tcpTx) tcpTx.innerText = st.tcp.tx_count || 0;
+            const tcpRx = document.getElementById('view-tcp-rx');
+            if (tcpRx) tcpRx.innerText = st.tcp.rx_count || 0;
+            const tcpInv = document.getElementById('view-tcp-inv');
+            if (tcpInv) tcpInv.innerText = st.tcp.invalid_count || 0;
           }
           if (st.heap) {
             const freeKb = Math.round(st.heap.free_bytes / 1024);
@@ -1256,10 +1265,9 @@ void config_ui_start_server() {
         log_d("[WebUI] GET /status requested (Client: %s)", request->client()->remoteIP().toString().c_str());
 
         SystemTelemetrySnapshot snapshot = diag_telemetry_get_snapshot();
-        String json;
-        diag_telemetry_format_json(snapshot, json);
-
-        request->send(200, "application/json", json);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        diag_telemetry_format_json(snapshot, *response);
+        request->send(response);
     });
 
     /**

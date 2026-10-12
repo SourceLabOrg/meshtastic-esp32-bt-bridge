@@ -48,6 +48,33 @@ void utils_escape_json_append(String& dest, const String& input) {
 }
 
 /**
+ * Stream an escaped JSON string directly to a Print stream, avoiding any heap allocation.
+ * @param out Destination Print stream (e.g. AsyncResponseStream)
+ * @param input Raw null-terminated C string to escape
+ */
+void utils_escape_json_print(Print& out, const char* input) {
+    if (!input) return;
+    while (*input) {
+        char c = *input++;
+        if (c == '"') out.print("\\\"");
+        else if (c == '\\') out.print("\\\\");
+        else if (c == '\b') out.print("\\b");
+        else if (c == '\f') out.print("\\f");
+        else if (c == '\n') out.print("\\n");
+        else if (c == '\r') out.print("\\r");
+        else if (c == '\t') out.print("\\t");
+        else if (c >= 32 && c <= 126) out.print(c);
+    }
+}
+
+/**
+ * Overload to stream an escaped Arduino String directly to a Print stream.
+ */
+void utils_escape_json_print(Print& out, const String& input) {
+    utils_escape_json_print(out, input.c_str());
+}
+
+/**
  * Given a string json value, escape it.
  * @param input Value to be escaped.
  * @return Escaped input.
