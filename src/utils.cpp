@@ -20,31 +20,30 @@ void utils_set_debug_logging(bool enableDebugLogs) {
 }
 
 /**
- * Append an escaped JSON string directly to an existing String buffer,
- * avoiding intermediate heap allocations.
- * @param dest Destination String buffer (should be pre-reserved)
+ * Stream an escaped JSON string directly to a Print stream, avoiding any heap allocation.
+ * @param out Destination Print stream (e.g. AsyncResponseStream)
  * @param input Raw null-terminated C string to escape
  */
-void utils_escape_json_append(String& dest, const char* input) {
+void utils_escape_json_print(Print& out, const char* input) {
     if (!input) return;
     while (*input) {
         char c = *input++;
-        if (c == '"') dest += "\\\"";
-        else if (c == '\\') dest += "\\\\";
-        else if (c == '\b') dest += "\\b";
-        else if (c == '\f') dest += "\\f";
-        else if (c == '\n') dest += "\\n";
-        else if (c == '\r') dest += "\\r";
-        else if (c == '\t') dest += "\\t";
-        else if (c >= 32 && c <= 126) dest += c;
+        if (c == '"') out.print("\\\"");
+        else if (c == '\\') out.print("\\\\");
+        else if (c == '\b') out.print("\\b");
+        else if (c == '\f') out.print("\\f");
+        else if (c == '\n') out.print("\\n");
+        else if (c == '\r') out.print("\\r");
+        else if (c == '\t') out.print("\\t");
+        else if (c >= 32 && c <= 126) out.print(c);
     }
 }
 
 /**
- * Overload to append an escaped Arduino String directly to a destination String buffer.
+ * Overload to stream an escaped Arduino String directly to a Print stream.
  */
-void utils_escape_json_append(String& dest, const String& input) {
-    utils_escape_json_append(dest, input.c_str());
+void utils_escape_json_print(Print& out, const String& input) {
+    utils_escape_json_print(out, input.c_str());
 }
 
 /**
@@ -55,7 +54,18 @@ void utils_escape_json_append(String& dest, const String& input) {
 String utils_escape_json(const String& input) {
     String output;
     output.reserve(input.length() + 16);
-    utils_escape_json_append(output, input.c_str());
+    const char* p = input.c_str();
+    while (*p) {
+        char c = *p++;
+        if (c == '"') output += "\\\"";
+        else if (c == '\\') output += "\\\\";
+        else if (c == '\b') output += "\\b";
+        else if (c == '\f') output += "\\f";
+        else if (c == '\n') output += "\\n";
+        else if (c == '\r') output += "\\r";
+        else if (c == '\t') output += "\\t";
+        else if (c >= 32 && c <= 126) output += c;
+    }
     return output;
 }
 

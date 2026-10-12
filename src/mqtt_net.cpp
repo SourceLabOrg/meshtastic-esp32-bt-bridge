@@ -28,10 +28,10 @@ static std::atomic<bool> s_mqtt_enabled{false};
  */
 static std::atomic<uint32_t> s_msgs_published{0};
 static std::atomic<uint32_t> s_msgs_received{0};
-static std::atomic<uint32_t> s_msgs_dropped{0};
+static std::atomic<uint32_t> s_msgs_invalid{0};
 
-void mqtt_net_record_dropped() {
-    s_msgs_dropped.fetch_add(1, std::memory_order_relaxed);
+void mqtt_net_record_invalid() {
+    s_msgs_invalid.fetch_add(1, std::memory_order_relaxed);
 }
 
 /**
@@ -260,11 +260,13 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
             if (event->topic_len >= (int)sizeof(proxy_msg->topic)) {
                 log_e("[MQTT] ERROR: Downlink topic exceeds protobuf capacity (%d >= %zu bytes). Dropping packet.",
                       event->topic_len, sizeof(proxy_msg->topic));
+                mqtt_net_record_invalid();
                 break;
             }
             if ((size_t)event->data_len > sizeof(proxy_msg->payload_variant.data.bytes)) {
                 log_e("[MQTT] ERROR: Downlink payload exceeds protobuf capacity (%d > %zu bytes). Dropping packet.",
                       event->data_len, sizeof(proxy_msg->payload_variant.data.bytes));
+                mqtt_net_record_invalid();
                 break;
             }
 
@@ -292,7 +294,8 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
             if (pb_encode(&stream, meshtastic_ToRadio_fields, &to_radio)) {
                 downlinkCallback(to_radio_buf, stream.bytes_written);
             } else {
-                log_e("[MQTT] Failed to encode ToRadio protobuf for downlink (%s)", PB_GET_ERROR(&stream));
+                log_e("[MQTT] ERROR: Failed to encode ToRadio protobuf for downlink (%s)", PB_GET_ERROR(&stream));
+                mqtt_net_record_invalid();
             }
             break;
         }
@@ -782,6 +785,6 @@ MqttStatus mqtt_net_get_status() {
     }
     st.msgs_published = s_msgs_published.load(std::memory_order_relaxed);
     st.msgs_received = s_msgs_received.load(std::memory_order_relaxed);
-    st.msgs_dropped = s_msgs_dropped.load(std::memory_order_relaxed);
+    st.msgs_invalid = s_msgs_invalid.load(std::memory_order_relaxed);
     return st;
 }

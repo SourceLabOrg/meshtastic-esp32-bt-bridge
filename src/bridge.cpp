@@ -35,11 +35,23 @@ static uint8_t mqtt_to_ble_queue_storage[MQTT_QUEUE_SIZE * sizeof(BridgePacket)]
 static QueueHandle_t mqtt_to_ble_queue = NULL;
 
 /**
- * Tracks if we drop packets from our queues.
+ * Tracks if we drop packets from our queues (capacity full).
  */
 static std::atomic<uint32_t> s_tcp_to_ble_dropped{0};
 static std::atomic<uint32_t> s_ble_to_tcp_dropped{0};
+static std::atomic<uint32_t> s_mqtt_to_ble_dropped{0};
 static std::atomic<bool> s_ble_connected{false};
+
+/**
+ * Atomic traffic & packet integrity counters (wait-free, zero lock contention).
+ */
+static std::atomic<uint32_t> s_ble_rx_count{0};
+static std::atomic<uint32_t> s_ble_tx_count{0};
+static std::atomic<uint32_t> s_ble_invalid_count{0};
+
+static std::atomic<uint32_t> s_tcp_rx_count{0};
+static std::atomic<uint32_t> s_tcp_tx_count{0};
+static std::atomic<uint32_t> s_tcp_invalid_count{0};
 
 struct ClientContext {
     AsyncClient* client;
@@ -80,7 +92,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
     // Only update the tcpClients list after grabbing the mutex
     if (xSemaphoreTake(tcpClientsMutex, portMAX_DELAY) == pdTRUE) {
         tcpClients.push_back(ctx);
-        connectedClientsCount++;
+        connectedClientsCount.fetch_add(1, std::memory_order_relaxed);
         xSemaphoreGive(tcpClientsMutex);
     }
 
@@ -95,6 +107,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
         // Protect against OOM (e.g., malicious stream or massive desync)
         if (ctx->rx_buffer.size() + len > 2048) {
             log_e("[Bridge-TCP] ERROR: RX Buffer overflow! Disconnecting client to prevent OOM.");
+            s_tcp_invalid_count.fetch_add(1, std::memory_order_relaxed);
             c->close();
             return;
         }
@@ -110,13 +123,16 @@ static void onClientConnected(void* arg, AsyncClient* client) {
 
                 // Protect against unreasonably large lengths (e.g. invalid header masquerading as 0x94 0xC3)
                 if (payload_len > 1024) {
+                    log_e("[Bridge-TCP] ERROR: Invalid frame header payload length (%u bytes > 1024)", payload_len);
+                    s_tcp_invalid_count.fetch_add(1, std::memory_order_relaxed);
                     processed++; // Invalid length, skip one byte and search again
                     continue;
                 }
 
                 if (ctx->rx_buffer.size() - processed >= 4 + payload_len) {
-                    // Valid full frame
+                    // Valid full frame received from client
                     log_d("[Bridge-TCP] Parsed frame: len %u", payload_len);
+                    s_tcp_rx_count.fetch_add(1, std::memory_order_relaxed);
                     BridgePacket packet;
                     packet.len = payload_len;
                     if (payload_len <= sizeof(packet.data)) {
@@ -127,7 +143,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
                         }
                     } else {
                         log_e("[Bridge-TCP] ERROR: Payload too large (%u bytes)", payload_len);
-                        s_tcp_to_ble_dropped.fetch_add(1, std::memory_order_relaxed);
+                        s_tcp_invalid_count.fetch_add(1, std::memory_order_relaxed);
                     }
                     processed += 4 + payload_len;
                 } else {
@@ -154,7 +170,7 @@ static void onClientConnected(void* arg, AsyncClient* client) {
             auto it = std::find(tcpClients.begin(), tcpClients.end(), ctx);
             if (it != tcpClients.end()) {
                 tcpClients.erase(it);
-                connectedClientsCount--;
+                connectedClientsCount.fetch_sub(1, std::memory_order_relaxed);
             }
             xSemaphoreGive(tcpClientsMutex);
         }
@@ -287,7 +303,16 @@ static void bridgeBleTask(void* parameter) {
                 if (toRadioChar && toRadioChar->canWrite()) {
                     // Meshtastic ToRadio expects Write Without Response (false)
                     bool success = toRadioChar->writeValue(packet.data, packet.len, false);
-                    log_d("[Bridge-BLE] Write success: %d", success);
+                    if (success) {
+                        log_d("[Bridge-BLE] Write success");
+                        s_ble_tx_count.fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        log_e("[Bridge-BLE] ERROR: Failed to write packet to ToRadio characteristic");
+                        s_ble_invalid_count.fetch_add(1, std::memory_order_relaxed);
+                    }
+                } else {
+                    log_e("[Bridge-BLE] ERROR: ToRadio characteristic unavailable or unwritable");
+                    s_ble_invalid_count.fetch_add(1, std::memory_order_relaxed);
                 }
             }
 
@@ -319,6 +344,7 @@ static void bridgeBleTask(void* parameter) {
                         lastPacketTime = millis();
 
                         log_d("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!", currentVal.length());
+                        s_ble_rx_count.fetch_add(1, std::memory_order_relaxed);
 
                         /*
                          * Pass the raw packet to the MQTT subsystem to determine if its relevant to it or not.
@@ -348,7 +374,7 @@ static void bridgeBleTask(void* parameter) {
                                 }
                             } else {
                                 log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
-                                s_ble_to_tcp_dropped.fetch_add(1, std::memory_order_relaxed);
+                                s_ble_invalid_count.fetch_add(1, std::memory_order_relaxed);
                             }
                         }
 
@@ -396,14 +422,17 @@ static void bridgeNetTask(void* parameter) {
                         if (ctx->client->space() >= frame_len) {
                             ctx->client->write((const char*)frame, frame_len);
                             ctx->client->send(); // Force immediate transmission
+                            s_tcp_tx_count.fetch_add(1, std::memory_order_relaxed);
                         } else {
-                            log_w("[Bridge-Net] WARNING: Client TX buffer full! Dropped %zu bytes for %s", packet.len, ctx->client->remoteIP().toString().c_str());
+                            log_e("[Bridge-Net] ERROR: Client TX buffer full! Dropped %zu bytes for %s", packet.len, ctx->client->remoteIP().toString().c_str());
+                            s_tcp_invalid_count.fetch_add(1, std::memory_order_relaxed);
                         }
                     }
                     xSemaphoreGive(tcpClientsMutex);
                 }
             } else {
                 log_e("[Bridge-Net] ERROR: Packet too large for frame buffer (%zu bytes)", packet.len);
+                s_tcp_invalid_count.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
@@ -424,15 +453,15 @@ bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
     }
     if (len > sizeof(BridgePacket::data)) {
         log_e("[Bridge-MQTT] ERROR: Downlink packet too large (%zu bytes, max %zu)", len, sizeof(BridgePacket::data));
-        mqtt_net_record_dropped();
+        mqtt_net_record_invalid();
         return false;
     }
     BridgePacket packet;
     packet.len = len;
     memcpy(packet.data, data, len);
     if (xQueueSend(mqtt_to_ble_queue, &packet, 0) != pdTRUE) {
-        log_w("[Bridge-MQTT] WARNING: mqtt_to_ble_queue full (%d packets), dropped downlink packet", MQTT_QUEUE_SIZE);
-        mqtt_net_record_dropped();
+        log_e("[Bridge-MQTT] ERROR: mqtt_to_ble_queue full (%d packets), dropped downlink packet", MQTT_QUEUE_SIZE);
+        s_mqtt_to_ble_dropped.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     return true;
@@ -538,10 +567,16 @@ BridgeDiagStats bridge_get_diag_stats() {
     stats.ble_to_tcp_dropped = s_ble_to_tcp_dropped.load(std::memory_order_relaxed);
     stats.mqtt_to_ble_waiting = mqtt_to_ble_queue ? uxQueueMessagesWaiting(mqtt_to_ble_queue) : 0;
     stats.mqtt_to_ble_capacity = MQTT_QUEUE_SIZE;
-    stats.mqtt_to_ble_dropped = mqtt_net_get_status().msgs_dropped;
+    stats.mqtt_to_ble_dropped = s_mqtt_to_ble_dropped.load(std::memory_order_relaxed);
     stats.connected_tcp_clients = connectedClientsCount.load();
     stats.ble_task_stack_free_bytes = bridgeBleTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeBleTaskHandle) * sizeof(StackType_t)) : 0;
     stats.net_task_stack_free_bytes = bridgeNetTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeNetTaskHandle) * sizeof(StackType_t)) : 0;
     stats.ble_connected = bridge_is_ble_connected();
+    stats.ble_rx_count = s_ble_rx_count.load(std::memory_order_relaxed);
+    stats.ble_tx_count = s_ble_tx_count.load(std::memory_order_relaxed);
+    stats.ble_invalid_count = s_ble_invalid_count.load(std::memory_order_relaxed);
+    stats.tcp_rx_count = s_tcp_rx_count.load(std::memory_order_relaxed);
+    stats.tcp_tx_count = s_tcp_tx_count.load(std::memory_order_relaxed);
+    stats.tcp_invalid_count = s_tcp_invalid_count.load(std::memory_order_relaxed);
     return stats;
 }

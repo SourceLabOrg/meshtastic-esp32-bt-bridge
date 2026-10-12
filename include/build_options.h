@@ -131,6 +131,10 @@
 #define FIRMWARE_VERSION "v1.0.0-dev"
 #endif
 
+#ifndef HARDWARE_BOARD_NAME
+#define HARDWARE_BOARD_NAME "generic"
+#endif
+
 #ifndef PROJECT_GITHUB_URL
 #define PROJECT_GITHUB_URL "https://www.github.com/sourcelaborg/meshtastic-esp32-bt-bridge"
 #endif

@@ -10,16 +10,17 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 ### 1. Modular Card Design
 * **WiFi Network Card:**
   * Displays the current configured SSID, masked password status, live WiFi connection status pill (`Connected` / `AP Mode` / `Disconnected` / `Not Configured`), active IP address, advertised mDNS hostname (e.g. `dsc-ae28.local`), and live WiFi RSSI signal strength with colored quality pill (`Excellent` / `Good` / `Fair` / `Weak`).
+  * Displays active **TCP Clients** (`X / 3`) and live **TCP Traffic** counters (sent, received, invalid).
   * In Edit mode, offers a live scan dropdown of nearby WiFi networks (with RSSI signal levels and lock/open security indicators), manual SSID entry for hidden networks, and Password input with a **Show/Hide** toggle.
   * Features a **🔍 Scan for Networks** button (with scan in progress indicator and scan/save buttons disabled during scans).
   * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
 * **Bluetooth Target Card:**
-  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed), masked PIN, and live Bluetooth connection status pill (`Connected` / `Disconnected`).
+  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed), masked PIN, live Bluetooth connection status pill (`Connected` / `Disconnected`), and live Bluetooth **Traffic** counters (sent, received, invalid).
   * In Edit mode, offers a live scan dropdown with RSSI signal strengths, manual MAC entry, and 6-digit PIN input.
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
   * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
 * **MQTT Gateway Card:**
-  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, Client Status pill, and published/received telemetry packet counters.
+  * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, Client Status pill, and live MQTT **Traffic** counters (sent, received, invalid).
   * In Edit mode, offers:
     * **Enable MQTT Gateway** toggle.
     * **Skip Certificate Validation** toggle (for self-signed / local LAN brokers).
@@ -27,7 +28,6 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Independent **Save MQTT Settings** button persists settings to NVS and applies them immediately.
 * **System Actions Card:**
   * Displays formatted **System Uptime** (e.g. `1h 24m 12s`).
-  * Displays active **TCP Clients** (`X / 3`).
   * Displays **Memory (Heap)** stats: Free Heap, Minimum Recorded Free Heap, and Maximum Allocatable Block in KB.
   * Displays **Free Task Stacks** high-water mark headroom for `bridge_ble` and `bridge_net` tasks.
   * Displays **Queue Buffers**: Visual color-coded capacity progress bars (`< 50%` Green, `50-80%` Yellow, `> 80%` Red), message counts (`waiting / capacity`), and drop counters for `TCP ➔ BLE`, `BLE ➔ TCP`, and `MQTT ➔ BLE` queues.
@@ -62,7 +62,8 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 2. **Web Server Endpoints (`config_ui.cpp`)**:
    * **`GET /`**: Serves the single-page HTML/CSS/JS application directly from flash (`PROGMEM`) via `AsyncProgmemResponse` with zero heap allocation.
    * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_tls_insecure":false,"mqtt_custom_ca":"..."}`.
-   * **`GET /status`**: Returns unified live diagnostic and telemetry JSON polled every 7 seconds by the client: contains `uptime_seconds`, `heap` (free, min_free, max_alloc), `wifi` (connected, is_ap_mode, ip, rssi, mdns_host), `ble` (connected), `tcp` (connected_clients, max_clients), `queues` (waiting, capacity, dropped for `tcp_to_ble`, `ble_to_tcp`, `mqtt_to_ble`), `stacks` (ble_task, net_task free bytes), and `mqtt` (gateway_enabled, state, radio_proxy_enabled, broker, root, traffic counters).
+   * **`GET /status`**: Returns unified live diagnostic and telemetry JSON polled every 7 seconds by the client: contains `uptime_seconds`, `heap` (free, min_free, max_alloc), `wifi` (connected, is_ap_mode, ip, rssi, mdns_host), `ble` (connected, rx_count, tx_count, invalid_count), `tcp` (connected_clients, max_clients, rx_count, tx_count, invalid_count), `traffic` (ble, tcp, mqtt rx/tx/invalid), `queues` (waiting, capacity, dropped for `tcp_to_ble`, `ble_to_tcp`, `mqtt_to_ble`), `stacks` (ble_task, net_task free bytes), and `mqtt` (gateway_enabled, state, radio_proxy_enabled, broker, root, published, received, dropped, invalid).
+   * **`GET /metrics`**: Standards-compliant Prometheus / OpenMetrics scraping endpoint (`text/plain; version=0.0.4; charset=utf-8`). Streams line-by-line metrics (`meshbridge_*`) directly into lwIP network output buffers via `AsyncResponseStream` with zero large heap allocations. Suitable for scraping by Prometheus, VictoriaMetrics, Grafana Agent, and Home Assistant.
    * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
    * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
    * **`GET /start_scan`**: Initiates an asynchronous 4-second BLE scan.

@@ -42,3 +42,82 @@ In the Meshtastic App on your phone:
 4. Click **Save MQTT Settings**.
 
 The bridge will automatically discover the radio's MQTT configuration over Bluetooth and maintain an active broker connection.
+
+---
+
+## Prometheus & OpenMetrics Monitoring (`GET /metrics`)
+
+The bridge features a built-in Prometheus exporter on port 80 at `http://<bridge-name>.local/metrics` (or `http://<ip>/metrics`). It streams metrics in standard Prometheus 0.0.4 text format with zero large heap allocations.
+
+### Scraping with Prometheus (`prometheus.yml`)
+
+Add a scrape job to your `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: "meshtastic_bridge"
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+    scrape_timeout: 5s
+    static_configs:
+      - targets:
+          - "192.168.1.145:80"       # By IP address
+          - "mesh-af28.local:80"     # By mDNS hostname
+        labels:
+          role: "base-station-relay"
+```
+
+### Complete Metric Reference Table
+
+| Metric Name | Type | Labels | Description |
+| :--- | :--- | :--- | :--- |
+| `meshbridge_info` | gauge | `version`, `mdns`, `board` | Identity and hardware metadata for the bridge (always `1`). |
+| `meshbridge_uptime_seconds` | counter | *(none)* | Total seconds elapsed since the ESP32 booted. |
+| `meshbridge_heap_free_bytes` | gauge | *(none)* | Current free internal heap memory in bytes. |
+| `meshbridge_heap_min_free_bytes` | gauge | *(none)* | Lowest historical free heap memory in bytes since boot. |
+| `meshbridge_heap_max_alloc_bytes` | gauge | *(none)* | Largest contiguous allocatable block in heap memory in bytes. |
+| `meshbridge_task_stack_free_bytes` | gauge | `task="ble"\|"net"` | Stack high-water mark remaining for internal FreeRTOS tasks. |
+| `meshbridge_wifi_connected` | gauge | *(none)* | WiFi connection state (`1` = connected to AP, `0` = disconnected). |
+| `meshbridge_wifi_rssi_dbm` | gauge | *(none)* | WiFi Received Signal Strength Indicator (RSSI) in dBm. |
+| `meshbridge_ble_connected` | gauge | *(none)* | Bluetooth connection state to Meshtastic radio (`1` = connected, `0` = disconnected). |
+| `meshbridge_tcp_clients` | gauge | *(none)* | Current number of active TCP app clients (0 to 3). |
+| `meshbridge_tcp_clients_max` | gauge | *(none)* | Maximum allowable concurrent TCP clients (`3`). |
+| `meshbridge_messages_rx_total` | counter | `channel="ble"\|"tcp"\|"mqtt"` | Valid packets successfully received across the given transport boundary. |
+| `meshbridge_messages_tx_total` | counter | `channel="ble"\|"tcp"\|"mqtt"` | Packets successfully transmitted across the given transport boundary. |
+| `meshbridge_messages_invalid_total` | counter | `channel="ble"\|"tcp"\|"mqtt"` | Malformed, oversized, or unparseable packets rejected at the transport boundary. |
+| `meshbridge_queue_messages` | gauge | `queue="tcp_to_ble"\|"ble_to_tcp"\|"mqtt_to_ble"` | Current number of queued items waiting in the inter-task buffer. |
+| `meshbridge_queue_capacity` | gauge | `queue="tcp_to_ble"\|"ble_to_tcp"\|"mqtt_to_ble"` | Maximum buffer capacity of the inter-task queue (e.g. 32 or 16). |
+| `meshbridge_queue_dropped_total` | counter | `queue="tcp_to_ble"\|"ble_to_tcp"\|"mqtt_to_ble"` | Packets dropped strictly due to FreeRTOS queue buffer exhaustion. |
+| `meshbridge_mqtt_enabled` | gauge | *(none)* | Whether the MQTT Gateway subsystem is enabled (`1` = enabled, `0` = disabled). |
+| `meshbridge_mqtt_connected` | gauge | *(none)* | Whether the MQTT client is currently connected to the broker (`1` = connected, `0` = disconnected). |
+
+### Example Prometheus Alerting Rules
+
+```yaml
+groups:
+  - name: meshtastic_bridge_alerts
+    rules:
+      - alert: MeshtasticRadioDisconnected
+        expr: meshbridge_ble_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bridge {{ $labels.instance }} lost Bluetooth connection to radio"
+
+      - alert: BridgeQueueDropsDetected
+        expr: rate(meshbridge_queue_dropped_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bridge {{ $labels.instance }} is dropping packets due to queue congestion on {{ $labels.queue }}"
+
+      - alert: BridgeLowHeapMemory
+        expr: meshbridge_heap_free_bytes < 40000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bridge {{ $labels.instance }} has low heap memory ({{ $value }} bytes remaining)"
+```

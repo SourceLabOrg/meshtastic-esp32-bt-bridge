@@ -65,6 +65,8 @@ meshtastic-esp32-bt-bridge/
 │   ├── configuration_ui.md# Captive portal design
 │   ├── development.md     # Build guide, queue sizing & release instructions
 │   ├── feature-mqtt-proxy.md # Standalone MQTT Gateway & Proxy architecture
+│   ├── feature-prometheus-metrics.md # Prometheus / OpenMetrics scraper specification
+│   ├── feature-webui-metrics.md # Live Diagnostic Metrics in WebUI
 │   └── user_guide.md      # End-user manual and LED reference
 ├── include/               # Header files
 │   ├── bridge.h
