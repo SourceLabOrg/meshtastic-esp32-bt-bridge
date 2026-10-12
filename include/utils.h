@@ -14,8 +14,6 @@ void utils_set_debug_logging(bool enable);
 
 // Escape special characters for safe inclusion in JSON strings
 String utils_escape_json(const String& input);
-void utils_escape_json_append(String& dest, const char* input);
-void utils_escape_json_append(String& dest, const String& input);
 void utils_escape_json_print(Print& out, const char* input);
 void utils_escape_json_print(Print& out, const String& input);
 

@@ -23,6 +23,7 @@ SystemTelemetrySnapshot diag_telemetry_get_snapshot() {
     s.bridge = bridge_get_diag_stats();
     s.mqtt_enabled = mqtt_net_is_enabled();
     s.mqtt = mqtt_net_get_status();
+    s.mqtt.msgs_dropped = s.bridge.mqtt_to_ble_dropped;
 
     return s;
 }
@@ -147,7 +148,7 @@ void diag_telemetry_format_json(const SystemTelemetrySnapshot& s, Print& out) {
     out.print(",\"received\":");
     out.print(s.mqtt.msgs_received);
     out.print(",\"dropped\":");
-    out.print(s.bridge.mqtt_to_ble_dropped);
+    out.print(s.mqtt.msgs_dropped);
     out.print(",\"invalid\":");
     out.print(s.mqtt.msgs_invalid);
     out.print(",\"radio_server\":\"");

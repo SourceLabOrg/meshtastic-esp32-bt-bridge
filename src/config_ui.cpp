@@ -1224,28 +1224,29 @@ void config_ui_start_server() {
     server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request){
         log_d("[WebUI] GET /config requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         BridgeConfig cfg = config_ui_load();
-        String json;
-        json.reserve(512);
-        json = "{\"wifi_ssid\":\"";
-        utils_escape_json_append(json, cfg.wifi_ssid);
-        json += "\",\"wifi_has_pass\":";
-        json += (cfg.wifi_pass.length() > 0 ? "true" : "false");
-        json += ",\"ble_name\":\"";
-        utils_escape_json_append(json, cfg.ble_name);
-        json += "\",\"ble_mac\":\"";
-        utils_escape_json_append(json, cfg.ble_mac);
-        json += "\",\"ble_pin\":\"";
-        utils_escape_json_append(json, cfg.ble_pin);
-        json += "\",\"debug_logs\":";
-        json += (cfg.debug_logs ? "true" : "false");
-        json += ",\"mqtt_enabled\":";
-        json += (cfg.mqtt_enabled ? "true" : "false");
-        json += ",\"mqtt_tls_insecure\":";
-        json += (cfg.mqtt_tls_insecure ? "true" : "false");
-        json += ",\"mqtt_custom_ca\":\"";
-        utils_escape_json_append(json, cfg.mqtt_custom_ca);
-        json += "\"}";
-        request->send(200, "application/json", json);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+
+        response->print("{\"wifi_ssid\":\"");
+        utils_escape_json_print(*response, cfg.wifi_ssid);
+        response->print("\",\"wifi_has_pass\":");
+        response->print(cfg.wifi_pass.length() > 0 ? "true" : "false");
+        response->print(",\"ble_name\":\"");
+        utils_escape_json_print(*response, cfg.ble_name);
+        response->print("\",\"ble_mac\":\"");
+        utils_escape_json_print(*response, cfg.ble_mac);
+        response->print("\",\"ble_pin\":\"");
+        utils_escape_json_print(*response, cfg.ble_pin);
+        response->print("\",\"debug_logs\":");
+        response->print(cfg.debug_logs ? "true" : "false");
+        response->print(",\"mqtt_enabled\":");
+        response->print(cfg.mqtt_enabled ? "true" : "false");
+        response->print(",\"mqtt_tls_insecure\":");
+        response->print(cfg.mqtt_tls_insecure ? "true" : "false");
+        response->print(",\"mqtt_custom_ca\":\"");
+        utils_escape_json_print(*response, cfg.mqtt_custom_ca);
+        response->print("\"}");
+
+        request->send(response);
     });
 
     /**

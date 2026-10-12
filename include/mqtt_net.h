@@ -46,6 +46,7 @@ struct MqttStatus {
     // Counters/State.
     uint32_t msgs_published = 0;
     uint32_t msgs_received = 0;
+    uint32_t msgs_dropped = 0;
     uint32_t msgs_invalid = 0;
     String last_error = "";
 };
