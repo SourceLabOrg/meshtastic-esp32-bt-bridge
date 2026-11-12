@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #include "config_ui.h"
 #include "ble_client.h"
 #include "wifi_net.h"
@@ -354,7 +357,8 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   <div class="footer">
     Firmware Version: )rawliteral" FIRMWARE_VERSION R"rawliteral(<br>
-    <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(" target="_blank">View Project on GitHub</a>
+    <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(" target="_blank">View Project on GitHub</a><br>
+    &copy; )rawliteral" COPYRIGHT_YEAR R"rawliteral( SourceLab.org &middot; <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(/blob/main/LICENSE" target="_blank">MIT License</a>
   </div>
 
   <!-- Custom In-DOM Modal for Captive Portal compatibility (macOS/iOS CNA) -->

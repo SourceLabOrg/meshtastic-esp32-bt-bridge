@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #include <Arduino.h>
 #include "status_led.h"
 #include "build_options.h"

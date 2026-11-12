@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 // ==============================================================================
@@ -137,4 +140,8 @@
 
 #ifndef PROJECT_GITHUB_URL
 #define PROJECT_GITHUB_URL "https://www.github.com/sourcelaborg/meshtastic-esp32-bt-bridge"
+#endif
+
+#ifndef COPYRIGHT_YEAR
+#define COPYRIGHT_YEAR "2026"
 #endif
