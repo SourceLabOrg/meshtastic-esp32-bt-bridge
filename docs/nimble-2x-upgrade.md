@@ -84,13 +84,15 @@ flowchart LR
 
 * **Disabling Unused BLE Peripheral / Broadcaster Roles:**
   * Because the bridge operates strictly as a **BLE Central** (`NimBLEClient`) and **BLE Observer** (`NimBLEScan`), adding `-D CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1` and `-D CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1` in `platformio.ini` strips `NimBLEServer`, `NimBLEAdvertising`, `NimBLEService`, and `NimBLECharacteristic`, saving ~21 KB of Flash and internal GATT server state.
-* **Compile-Time Memory & Flash Comparison (`1.4.3` vs `2.x`):**
+* **Compile-Time Memory & Flash Comparison (`1.4.3` vs `2.5.2`):**
 
-| Target Board | `1.4.3` RAM (`.bss` + `.data`) | `2.x` RAM (`.bss` + `.data`) | `1.4.3` Flash | `2.x` Flash |
-| :--- | :--- | :--- | :--- | :--- |
-| **`seeed_xiao_esp32s3`** | `101,264 B` (30.9%) | *TBD (Step 5)* | `1,313,021 B` (41.7%) | *TBD (Step 5)* |
-| **`esp32dev`** | `105,204 B` (32.1%) | *TBD (Step 5)* | `1,438,089 B` (45.7%) | *TBD (Step 5)* |
-| **`esp32-s3-devkitc-1`** | `101,520 B` (31.0%) | *TBD (Step 5)* | `1,319,805 B` (42.0%) | *TBD (Step 5)* |
+| Target Board | `1.4.3` RAM (`.bss` + `.data`) | `2.5.2` RAM (`.bss` + `.data`) | RAM Delta | `1.4.3` Flash | `2.5.2` Flash | Flash Saved |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`seeed_xiao_esp32s3`** | `101,264 B` (30.9%) | `101,752 B` (31.1%) | `+488 B` | `1,313,021 B` (41.7%) | `1,277,477 B` (40.6%) | **`-35,544 B` (-34.7 KB)** |
+| **`esp32dev`** | `105,204 B` (32.1%) | `105,764 B` (32.3%) | `+560 B` | `1,438,089 B` (45.7%) | `1,430,101 B` (45.5%) | **`-7,988 B` (-7.8 KB)** |
+| **`esp32-s3-devkitc-1`** | `101,520 B` (31.0%) | `102,008 B` (31.1%) | `+488 B` | `1,319,805 B` (42.0%) | `1,284,213 B` (40.8%) | **`-35,592 B` (-34.8 KB)** |
+
+  > *Note on Static RAM Delta:* The `+488 B` to `+560 B` increase in static `.bss` RAM reflects the new `576`-byte static `lastPacket[MESHTASTIC_MAX_PACKET_SIZE]` buffer in `pollFromRadio()` (`src/bridge.cpp`), which permanently replaces dynamic heap `std::string` allocations on Core 1.
 
 ---
 
@@ -99,19 +101,19 @@ flowchart LR
 - [x] **Step 1: Branch & Upgrade Plan Documentation**
   - Create `nimble-2x` branch off `integration`.
   - Commit `docs/nimble-2x-upgrade.md` and reference it in `docs/architecture.md`.
-- [ ] **Step 2: Build Configuration (`platformio.ini` & `include/build_options.h`)**
-  - Bump `h2zero/NimBLE-Arduino` to `^2.1.0`.
+- [x] **Step 2: Build Configuration (`platformio.ini` & `include/build_options.h`)**
+  - Bump `h2zero/NimBLE-Arduino` to `^2.1.0` (resolves to `2.5.2`).
   - Add `-D CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1`, `-D CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1`, and `-D CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=24`.
   - Add `BLE_MTU_SIZE` (`512`) and `BLE_WRITE_PACING_MS` (`12`) in `include/build_options.h`.
-- [ ] **Step 3: BLE Scanner & Connection Tester (`src/ble_client.cpp`)**
+- [x] **Step 3: BLE Scanner & Connection Tester (`src/ble_client.cpp`)**
   - *Chunk 3A:* Set `NimBLEDevice::setMTU(BLE_MTU_SIZE)` in `ble_client_init()`, replace inline scan completion lambda with `NimBLEScanCallbacks::onScanEnd`, convert `pScan->start()` duration to milliseconds (`BLUETOOTH_SCAN_TIME_SECONDS * 1000`), and update `results.getDevice(i)` to `const NimBLEAdvertisedDevice*`.
   - *Chunk 3B:* Update `BridgeClientCallbacks` to `2.x` signatures (`onPassKeyEntry` + `NimBLEDevice::injectPassKey`, `onConfirmPasskey` + `NimBLEDevice::injectConfirmPasskey`, `onAuthenticationComplete(NimBLEConnInfo&)`) and convert `pClient->setConnectTimeout()` to milliseconds (`BLUETOOTH_TIMEOUT_SECONDS * 1000`).
-- [ ] **Step 4: Core BLE Bridge Task (`src/bridge.cpp`)**
+- [x] **Step 4: Core BLE Bridge Task (`src/bridge.cpp`)**
   - *Chunk 4A:* Update `BridgeRuntimeClientCallbacks` (`onPassKeyEntry`, `onConfirmPasskey`, `onAuthenticationComplete`, `onDisconnect(NimBLEClient*, int reason)`), move `NimBLEDevice::setMTU(BLE_MTU_SIZE)` before `bleClient->connect()`, and convert `bleClient->setConnectTimeout()` to milliseconds.
-  - *Chunk 4B:* Add `BLE_WRITE_PACING_MS` (`12ms`) inter-write pacing guard, check `canWriteNoResponse() || canWrite()`, and refactor `FromRadio` reads to use `NimBLEAttValue` + a static byte buffer with zero heap allocation.
-- [ ] **Step 5: Multi-Board Build Verification & Documentation Sync**
+  - *Chunk 4B:* Add `BLE_WRITE_PACING_MS` (`12ms`) inter-write pacing guard, check `canWriteNoResponse() || canWrite()`, and refactor `FromRadio` reads into `pollFromRadio()` using `NimBLEAttValue` + a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) with flat early-return guards and zero heap allocation.
+- [x] **Step 5: Multi-Board Build Verification & Documentation Sync**
   - Run `pio run` across `seeed_xiao_esp32s3`, `esp32dev`, and `esp32-s3-devkitc-1` and record before/after Flash and RAM metrics.
-  - Update `docs/bridge_architecture.md`, `docs/feature-mqtt-proxy.md`, and `docs/development.md` in lockstep.
+  - Update `docs/bridge_architecture.md` and `docs/feature-mqtt-proxy.md` in lockstep.
 
 ---
 
@@ -122,5 +124,5 @@ flowchart LR
 | 2026-11-13 | Base Branch Selection | Branched `nimble-2x` off `integration` so both `mqtt-backpressure` and `toolTip` (SPDX headers) are present as the baseline. |
 | 2026-11-13 | `msys_1` Pool & Write Pacing | Decided to both increase `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT` from `12` to `24` (~3 KB RAM) and enforce a minimum `12ms` inter-write interval (`BLE_WRITE_PACING_MS`) in `bridgeBleTask` so `FromRadio` burst reads (`pendingRadioRead = true`) and multi-packet TCP bursts cannot overrun NimBLE's `msys_1` buffers when sending 512B MTU packets. |
 | 2026-11-13 | Unused NimBLE Roles | Enabled `CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1` and `CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1` since the bridge only acts as a BLE Central/Observer. |
-| 2026-11-13 | Zero-Heap `FromRadio` Read Path | Replaced `std::string` conversions on `fromRadioChar->readValue()` with `NimBLEAttValue` and a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) to eliminate fast-path heap allocations on Core 1. |
+| 2026-11-13 | Zero-Heap `FromRadio` Read Path & `pollFromRadio()` | Replaced `std::string` conversions on `fromRadioChar->readValue()` with `NimBLEAttValue` and a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) inside a dedicated `static bool pollFromRadio()` helper using flat early-return guards. Also guarded against oversized payloads (`> MESHTASTIC_MAX_PACKET_SIZE`) before setting `pendingRadioRead = true` to prevent fast-poll spin loops. |
 | 2026-11-13 | WebUI Scan/Test Contention in Normal Mode | Kept out of scope for the `2.x` upgrade to keep changes focused. |
