@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This document captures the research, architectural analysis, implementation plan, and decisions log for upgrading `h2zero/NimBLE-Arduino` from `^1.4.1` (`1.4.3`) to `^2.1.0` (`2.x` release line) across all supported ESP32 targets (`seeed_xiao_esp32s3`, `esp32dev`, `esp32-s3-devkitc-1`).
+This document captures the research, architectural analysis, implementation plan, and decisions log for upgrading `h2zero/NimBLE-Arduino` from `^1.4.1` (`1.4.3`) to `2.5.2` (pinned exact version in the `2.x` release line) across all supported ESP32 targets (`seeed_xiao_esp32s3`, `esp32dev`, `esp32-s3-devkitc-1`).
 
 Beyond migrating to the `2.x` C++ API in `src/ble_client.cpp` and `src/bridge.cpp`, our review of the `1.4.x` vs `2.x` stack internals uncovered **three critical behavioral and timing findings** affecting how packets are queued, read, and written over BLE:
 
@@ -108,7 +108,7 @@ flowchart LR
   - Create `nimble-2x` branch off `integration`.
   - Commit `docs/nimble-2x-upgrade.md` and reference it in `docs/architecture.md`.
 - [x] **Step 2: Build Configuration (`platformio.ini` & `include/build_options.h`)**
-  - Bump `h2zero/NimBLE-Arduino` to `^2.1.0` (resolves to `2.5.2`).
+  - Pin `h2zero/NimBLE-Arduino` to exact version `2.5.2`.
   - Add `-D CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1`, `-D CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1`, `-D CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=24`, and `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`.
   - Add `BLE_MTU_SIZE` (`512`) and `BLE_WRITE_PACING_MS` (`12`) in `include/build_options.h`.
 - [x] **Step 3: BLE Scanner & Connection Tester (`src/ble_client.cpp`)**
@@ -132,4 +132,5 @@ flowchart LR
 | 2026-11-13 | Unused NimBLE Roles | Enabled `CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1` and `CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1` since the bridge only acts as a BLE Central/Observer. |
 | 2026-11-13 | Zero-Heap `FromRadio` Read Path & `pollFromRadio()` | Replaced `std::string` conversions on `fromRadioChar->readValue()` with `NimBLEAttValue` and a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) inside a dedicated `static bool pollFromRadio()` helper using flat early-return guards. Also guarded against oversized payloads (`> MESHTASTIC_MAX_PACKET_SIZE`) before setting `pendingRadioRead = true` to prevent fast-poll spin loops. |
 | 2026-11-13 | Fixed `NimBLEAttValue` Capacity (`512` B) | Added `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512` in `platformio.ini` after code review of `NimBLEAttValue.cpp` revealed its default `20`-byte initial capacity caused `realloc()` fragmentation between `21` bytes (on empty 250ms polls) and $N$ bytes (on packet reads). |
+| 2026-11-13 | Pin Exact Version (`2.5.2`) | Pinned `h2zero/NimBLE-Arduino @ 2.5.2` (without `^`) in `platformio.ini` so future minor/patch upgrades are deliberate and audited against our buffer, timing, and heap assumptions. |
 | 2026-11-13 | WebUI Scan/Test Contention in Normal Mode | Kept out of scope for the `2.x` upgrade to keep changes focused. |
