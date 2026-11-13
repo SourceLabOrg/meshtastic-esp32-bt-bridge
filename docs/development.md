@@ -91,10 +91,14 @@ build_flags =
 - `TCP_PORT`: The network port the bridge listens on for incoming Meshtastic App connections. (Default: `4403`).
 - `TCP_IDLE_TIMEOUT_SECONDS`: How long before idle TCP connections will be disconnected. (Default: `600`).
 - `MAX_TCP_CLIENTS`: The maximum number of simultaneous apps that can connect to the bridge. (Default: `3`).
-- `BLUETOOTH_TIMEOUT_SECONDS`: Bluetooth connection timeout. (Default: `8`).
-- `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration. (Default: `4`).
-- `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to keep in memory from discovery scan. (Default: `60`).
+- `BLUETOOTH_TIMEOUT_SECONDS`: Bluetooth connection timeout in seconds. (Default: `10`).
+- `BLUETOOTH_RECONNECT_DELAY_MS`: Delay in milliseconds between BLE reconnection attempts. (Default: `5000`).
+- `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration in seconds. (Default: `5`).
+- `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to return from a discovery scan. (Default: `60`).
+- `BLE_MTU_SIZE`: Preferred BLE ATT MTU size (in bytes) negotiated with the Meshtastic radio. (Default: `512`).
+- `BLE_WRITE_PACING_MS`: Minimum interval (in milliseconds) between consecutive BLE `ToRadio` writes. (Default: `12`).
 - `WIFI_MAX_NETWORKS_DISCOVERABLE`: Maximum number of WiFi networks to keep in memory from discovery scan. (Default: `30`).
+- `MESHTASTIC_MAX_PACKET_SIZE`: Maximum binary packet size for Meshtastic `ToRadio` envelopes. (Default: `576`).
 - `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `32`).
 - `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `16`).
 

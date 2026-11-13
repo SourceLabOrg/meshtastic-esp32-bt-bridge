@@ -46,7 +46,7 @@ flowchart LR
   * If a connected Meshtastic App sent a burst of configuration packets over TCP (`tcp_to_ble_queue` non-empty), `xQueueReceive(tcp_to_ble_queue, ...)` returned in `0 ticks` on each loop iteration, firing `writeValue(..., false)` every `1ms`.
   * Similarly, when the radio was actively sending packets (`pendingRadioRead = true`), `waitTicks` was `0`, so queued MQTT downlink packets in `mqtt_to_ble_queue` were also written at `1ms` intervals instead of `11ms` intervals.
 * **Resolution:**
-  1. **Explicit Inter-Write Pacing (`BLE_WRITE_PACING_MS = 12`) in `bridgeBleTask`:** Track `lastBleWriteMs` in `bridgeBleTask` and only dequeue/transmit from `tcp_to_ble_queue` or `mqtt_to_ble_queue` once at least `BLE_WRITE_PACING_MS` (`12ms`, ~83 pkt/s max) has elapsed since the previous write. When a write was just performed and `pendingRadioRead` is `false`, sleep for the remaining pacing window so the task yields cleanly without busy-looping. This allows `FromRadio` reads to run at full speed (`0ms` wait when `pendingRadioRead == true`) while guaranteeing outbound writes never overrun NimBLE or the radio.
+  1. **Explicit Inter-Write Pacing (`BLE_WRITE_PACING_MS = 12`) in `bridgeBleTask`:** Track `lastBleWriteMs` in `bridgeBleTask` and gate outbound queue drains (`canWriteNow`) so `tcp_to_ble_queue` and `mqtt_to_ble_queue` are only dequeued/transmitted once at least `BLE_WRITE_PACING_MS` (`12ms`, ~83 pkt/s max) has elapsed since the previous write. During the 12ms post-write cooldown, `pollFromRadio()` continues to run every 1ms (`vTaskDelay(1)`) so incoming `FromNum` notifications and `FromRadio` burst reads execute immediately (`0ms` wait when `pendingRadioRead == true`) while guaranteeing outbound writes never overrun NimBLE or the radio.
   2. **Increase `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT` from `12` to `24` in `platformio.ini`:** Adds 12 extra 255-byte blocks (~3 KB static RAM), doubling NimBLE's internal buffer headroom for 512-byte MTU packets during duplex WiFi + BLE bursts.
   3. **Check `canWriteNoResponse() || canWrite()`:** Update the write guard on `toRadioChar` to check `(toRadioChar->canWriteNoResponse() || toRadioChar->canWrite())` so radios advertising either `WRITE_NO_RSP` or `WRITE` on `ToRadio` are supported.
 
@@ -94,6 +94,11 @@ flowchart LR
 | **`esp32-s3-devkitc-1`** | `101,520 B` (31.0%) | `102,008 B` (31.1%) | `+488 B` | `1,319,805 B` (42.0%) | `1,284,213 B` (40.8%) | **`-35,592 B` (-34.8 KB)** |
 
   > *Note on Static RAM Delta:* The `+488 B` to `+560 B` increase in static `.bss` RAM reflects the new `576`-byte static `lastPacket[MESHTASTIC_MAX_PACKET_SIZE]` buffer in `pollFromRadio()` (`src/bridge.cpp`), which permanently replaces dynamic heap `std::string` allocations on Core 1.
+
+* **Hardware Runtime Telemetry Verification (`NimBLE-Arduino 2.5.2`):**
+  * Verified on hardware over extended continuous operation (`Uptime: 2h 23m 13s`):
+    * **Free Heap:** `109 KB` (`Min: 94 KB`, `MaxBlock: 96 KB` — 88% of total free heap in a single contiguous block, confirming zero heap fragmentation).
+    * **Free Task Stack High-Water Marks:** `BLE: 4,296 B` free (out of `8,192 B`), `Net: 1,248 B` free (out of `4,096 B`).
 
 ---
 
