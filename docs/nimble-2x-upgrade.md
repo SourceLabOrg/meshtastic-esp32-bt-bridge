@@ -8,8 +8,8 @@ Beyond migrating to the `2.x` C++ API in `src/ble_client.cpp` and `src/bridge.cp
 
 1. **First-Boot MTU Negotiation Order (`255` vs `512` bytes):**
    In `src/bridge.cpp`, `NimBLEDevice::setMTU(512)` was previously called *after* `bleClient->connect(addr, false)`. Because NimBLE (both `1.4.x` and `2.x`) initiates the GATT MTU exchange *inside* `connect()` (`BLE_GAP_EVENT_CONNECT`), the first BLE connection after boot negotiated the default `255`-byte MTU instead of `512` bytes. Any outbound `ToRadio` packet $>252$ bytes silently fell back from non-blocking `ble_gattc_write_no_rsp_flat()` to blocking multi-packet `ble_gattc_write_long()` (Prepare/Execute Write with response). Moving `NimBLEDevice::setMTU(BLE_MTU_SIZE)` prior to `connect()` ensures `512` bytes is negotiated on the very first connection.
-2. **Faster GATT Reads (`ble_gattc_read` vs `ble_gattc_read_long`):**
-   In `1.4.x`, `fromRadioChar->readValue()` unconditionally invoked `ble_gattc_read_long()` (`ATT_READ_BLOB_REQ`). In `2.x`, `NimBLERemoteValueAttribute::readValue()` issues a standard `ble_gattc_read()` (`ATT_READ_REQ`) first and only falls back to `ble_gattc_read_long()` if the returned payload reaches `MTU - 1`. With a 512-byte MTU, `FromRadio` reads complete in a single connection event (~15–30ms) with lower protocol overhead.
+2. **Eliminating `NimBLEAttValue` Heap Fragmentation on `FromRadio` Reads:**
+   In `2.x` (`2.5.2`), `NimBLERemoteValueAttribute::readValue()` constructs a `NimBLEAttValue` initialized with `CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH` (default `20` bytes) and `realloc()`s both the temporary read buffer (inside `onReadCB` on Core 0) and `fromRadioChar->m_value` (`deepCopy()` on Core 1) whenever payload sizes fluctuate between `0` bytes (idle 250ms polls) and $30..512$ bytes (packets). By combining `NimBLEAttValue` + a static `lastPacket[MESHTASTIC_MAX_PACKET_SIZE]` buffer in `pollFromRadio()` with `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`, `fromRadioChar->m_value` is allocated once at `512` bytes and never reallocated, and temporary `readValue()` buffers use a constant `512`-byte size with zero `realloc()` churn or heap fragmentation.
 3. **Duplex Burst Pacing & `msys_1` Buffer Exhaustion Window:**
    When `pendingRadioRead` is `true`, `waitTicks` in `bridgeBleTask` drops from `10ms` to `0ms`. Likewise, when multiple packets are queued in `tcp_to_ble_queue`, `xQueueReceive` returns immediately (`0ms`) on every loop iteration. In both cases, `bridgeBleTask` could fire `toRadioChar->writeValue(..., false)` every `1ms` (1000 pkt/s). Furthermore, with `MTU = 512` properly negotiated, each large packet ($>255\text{ B}$) consumes **2–3 `msys_1` blocks** (out of the default `12`) instead of 1. To prevent `msys_1` exhaustion (`BLE_HS_ENOMEM`), we enforce an explicit minimum inter-write pacing interval (`BLE_WRITE_PACING_MS = 12`) and increase `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT` from `12` to `24`.
 
@@ -54,16 +54,17 @@ flowchart LR
 
 ### 2.2 Reading Data from the BLE Radio (`FromRadio` & `FromNum`)
 
-* **`ble_gattc_read` vs `ble_gattc_read_long` in `2.x`:**
-  * In `1.4.x`, `NimBLERemoteCharacteristic::readValue()` called `ble_gattc_read_long()` (`ATT_READ_BLOB_REQ` with offset 0).
-  * In `2.x`, `NimBLERemoteValueAttribute::readValue()` calls `ble_gattc_read()` (`ATT_READ_REQ`) first, and only chains `ble_gattc_read_long()` if the attribute value reaches `MTU - 1`.
-  * Because we negotiate `MTU = 512` (and Meshtastic `FromRadio` packets are $\le 512$ bytes), every `fromRadioChar->readValue()` in `2.x` completes in a single `ATT_READ_REQ` / `ATT_READ_RSP` exchange.
-* **Can Faster Reads Overrun `ble_to_tcp_queue`?**
-  * Each `readValue()` blocks `bridgeBleTask` for 1 BLE connection interval (20–40ms, i.e., ~25–50 packets/sec max).
+* **How `readValue()` Works in `2.5.2`:**
+  * In `2.5.2`, `NimBLERemoteValueAttribute::readValue()` issues `ble_gattc_read_long()` (`ATT_READ_BLOB_REQ` at offset 0) and automatically falls back to `ble_gattc_read()` (`ATT_READ_REQ`) if the peripheral returns `BLE_ATT_ERR_ATTR_NOT_LONG`.
+  * Because we negotiate `MTU = 512` prior to `connect()` (and Meshtastic `FromRadio` packets are $\le 512$ bytes, the Bluetooth Core Spec `BLE_ATT_ATTR_MAX_LEN` ceiling), every `fromRadioChar->readValue()` completes in a single connection event.
+* **Can Reads Overrun `ble_to_tcp_queue`?**
+  * Each `readValue()` blocks `bridgeBleTask` for 1 BLE connection interval (15–30ms, i.e., ~33–66 packets/sec max).
   * `bridgeNetTask` on Core 0 drains `ble_to_tcp_queue` (`BRIDGE_QUEUE_SIZE = 32`) into LwIP TCP buffers in $<1\text{ms}$ per packet, and `xQueueSend(ble_to_tcp_queue, ..., pdMS_TO_TICKS(50))` provides backpressure if WiFi momentarily stalls.
-* **Zero-Heap Fast-Path Read (`NimBLEAttValue` vs `std::string`):**
-  * Previously, `std::string currentVal = fromRadioChar->readValue();` and `static std::string lastPacket` triggered dynamic heap allocations on Core 1 for every packet $>15$ bytes (including 4 times per second during idle 250ms failsafe polling).
-  * Using `NimBLEAttValue currentVal = fromRadioChar->readValue();` directly with a static fixed buffer (`static uint8_t lastPacket[MESHTASTIC_MAX_PACKET_SIZE]; static size_t lastPacketLen = 0;`) and `memcmp()` eliminates all dynamic heap allocations from the Core 1 BLE read loop.
+* **Eliminating `std::string` Copies & `NimBLEAttValue` `realloc()` Churn (`CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH = 512`):**
+  * Previously, `std::string currentVal = fromRadioChar->readValue();` and `static std::string lastPacket` triggered dynamic heap `std::string` allocations on Core 1 for every read.
+  * Using `NimBLEAttValue currentVal = fromRadioChar->readValue();` directly with a static fixed buffer (`static uint8_t lastPacket[MESHTASTIC_MAX_PACKET_SIZE]; static size_t lastPacketLen = 0;`) inside `pollFromRadio()` eliminates `std::string` heap allocations.
+  * Additionally, in `NimBLE 2.5.2`, `NimBLEAttValue` defaults its initial buffer capacity (`CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH`) to `20` bytes. Without overriding that macro, every packet $>20$ bytes caused `onReadCB` (on Core 0) to `realloc()` the temporary buffer up to $N$ bytes, and then `m_value = value` (`deepCopy()`) `realloc()`ed `fromRadioChar->m_value` up to $N$ bytes on packet reads and back down to `21` bytes on idle `0`-byte reads (every 250ms), splitting heap blocks.
+  * Setting `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512` in `platformio.ini` ensures `fromRadioChar->m_value` is allocated once at `512` bytes (`BLE_ATT_ATTR_MAX_LEN`) and never resized, and every temporary `NimBLEAttValue` uses a constant `513`-byte block with zero `realloc()` calls or heap fragmentation.
 
 ---
 
@@ -103,7 +104,7 @@ flowchart LR
   - Commit `docs/nimble-2x-upgrade.md` and reference it in `docs/architecture.md`.
 - [x] **Step 2: Build Configuration (`platformio.ini` & `include/build_options.h`)**
   - Bump `h2zero/NimBLE-Arduino` to `^2.1.0` (resolves to `2.5.2`).
-  - Add `-D CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1`, `-D CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1`, and `-D CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=24`.
+  - Add `-D CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1`, `-D CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1`, `-D CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=24`, and `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`.
   - Add `BLE_MTU_SIZE` (`512`) and `BLE_WRITE_PACING_MS` (`12`) in `include/build_options.h`.
 - [x] **Step 3: BLE Scanner & Connection Tester (`src/ble_client.cpp`)**
   - *Chunk 3A:* Set `NimBLEDevice::setMTU(BLE_MTU_SIZE)` in `ble_client_init()`, replace inline scan completion lambda with `NimBLEScanCallbacks::onScanEnd`, convert `pScan->start()` duration to milliseconds (`BLUETOOTH_SCAN_TIME_SECONDS * 1000`), and update `results.getDevice(i)` to `const NimBLEAdvertisedDevice*`.
@@ -125,4 +126,5 @@ flowchart LR
 | 2026-11-13 | `msys_1` Pool & Write Pacing | Decided to both increase `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT` from `12` to `24` (~3 KB RAM) and enforce a minimum `12ms` inter-write interval (`BLE_WRITE_PACING_MS`) in `bridgeBleTask` so `FromRadio` burst reads (`pendingRadioRead = true`) and multi-packet TCP bursts cannot overrun NimBLE's `msys_1` buffers when sending 512B MTU packets. |
 | 2026-11-13 | Unused NimBLE Roles | Enabled `CONFIG_BT_NIMBLE_ROLE_PERIPHERAL_DISABLED=1` and `CONFIG_BT_NIMBLE_ROLE_BROADCASTER_DISABLED=1` since the bridge only acts as a BLE Central/Observer. |
 | 2026-11-13 | Zero-Heap `FromRadio` Read Path & `pollFromRadio()` | Replaced `std::string` conversions on `fromRadioChar->readValue()` with `NimBLEAttValue` and a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) inside a dedicated `static bool pollFromRadio()` helper using flat early-return guards. Also guarded against oversized payloads (`> MESHTASTIC_MAX_PACKET_SIZE`) before setting `pendingRadioRead = true` to prevent fast-poll spin loops. |
+| 2026-11-13 | Fixed `NimBLEAttValue` Capacity (`512` B) | Added `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512` in `platformio.ini` after code review of `NimBLEAttValue.cpp` revealed its default `20`-byte initial capacity caused `realloc()` fragmentation between `21` bytes (on empty 250ms polls) and $N$ bytes (on packet reads). |
 | 2026-11-13 | WebUI Scan/Test Contention in Normal Mode | Kept out of scope for the `2.x` upgrade to keep changes focused. |
