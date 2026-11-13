@@ -158,10 +158,20 @@ To prevent high-volume MQTT mesh traffic from blocking interactive phone app com
 ```
 
 1. **`tcp_to_ble_queue` (High Priority):** Carries locally generated phone app commands and chat packets. `bridgeBleTask` always checks and drains this queue first.
-2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty. Uses non-blocking `xQueueSend(..., 0)` to prevent blocking the MQTT networking loop.
+2. **`mqtt_to_ble_queue` (Normal Priority):** Carries incoming remote mesh packets received from the MQTT broker. Polled only when the TCP command queue is empty. Uses conditional backpressure (`50ms` timeout when BLE is connected, `0ms` non-blocking when BLE is disconnected during the 60s grace period).
 3. **Static Allocation (.bss segment):** All packet queues are statically reserved with zero dynamic `malloc` overhead:
    * **Unified Default Sizing:** `BRIDGE_QUEUE_SIZE = 32` (18.7 KB each), `MQTT_QUEUE_SIZE = 16` (9.3 KB) — total ~46.7 KB `.bss` queue RAM.
    * **Runtime Headroom:** Preserves **~106 KB free heap on ESP32-S3** and **~95 KB on Classic ESP32 (`esp32dev`)**, preventing heap starvation during simultaneous TLS handshakes, mDNS resolution, and WebUI HTTP serving.
+
+#### BLE Write Pacing vs. WiFi Burst Backpressure (Architectural Rationale)
+When MQTT subscribes to `<root>/#` or receives a burst of mesh packets over WiFi, dozens of packets can arrive from the broker in a few milliseconds (megabit WiFi speed), whereas the physical 2.4 GHz BLE link operates on 15–30ms connection intervals:
+* **Why `bridgeBleTask` Paces MQTT Drains at ~11ms/packet:**
+  Meshtastic's `ToRadio` GATT characteristic requires *Write Without Response* (`toRadioChar->writeValue(data, len, false)`). Under the hood, NimBLE's `ble_gattc_write_no_rsp_flat()` is non-blocking—it immediately allocates buffers from NimBLE's internal `msys_1` pool (`CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT = 12` blocks of 255 bytes) and queues an ACL frame (`12` buffers max) without waiting for the radio to transmit over the air.
+  In `bridgeBleTask`, waiting `10ms` on `tcp_to_ble_queue` (plus the `1ms` `vTaskDelay` yield at the bottom of the loop) before falling through to `mqtt_to_ble_queue` acts as a natural **~11ms/packet rate limiter (~90 pkt/s)**. Removing that 10ms wait would dump all 16 queued MQTT packets into NimBLE in 16ms, exhausting the 12 `msys_1` blocks (`BLE_HS_ENOMEM` / `ToRadio` write errors) and overrunning the Meshtastic radio's internal `ToRadio` receive buffer.
+* **Why Conditional `50ms` Backpressure Beats Enlarging the Queue in RAM:**
+  Instead of sacrificing precious internal SRAM (needed for MQTTS TLS handshakes on classic `esp32dev` boards) or introducing PSRAM board incompatibilities to make `mqtt_to_ble_queue` larger, `bridge_enqueue_mqtt_to_ble()` applies a `50ms` timeout on `xQueueSend` **only when `s_ble_connected` is `true`**:
+  * **When BLE is Connected (`50ms` timeout):** Once a fast WiFi burst fills the 16 queue slots, `esp_mqtt_task` blocks on `xQueueSend` for `~11ms` until `bridgeBleTask` pops the next packet. This pauses `recv()` on the underlying MQTT TCP socket and lets the already-allocated LwIP TCP receive window (`MQTT_CLIENT_BUFFER_SIZE = 2048 B`) naturally pace the incoming burst to match BLE's `11ms` drain rate with **zero extra RAM overhead**.
+  * **When BLE is Disconnected (`0ms` timeout):** During the 60-second BLE disconnect grace period, `bridgeBleTask` is not draining the queue. `s_ble_connected` is `false`, so `waitTicks` drops to `0`—once 16 packets are buffered, packet 17+ is dropped immediately in `0ms` without stalling `esp_mqtt_task`.
 
 ### 4.6 Connection Lifecycle & Disconnect Grace Period Model
 
