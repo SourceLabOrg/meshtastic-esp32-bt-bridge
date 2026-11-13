@@ -351,9 +351,15 @@ static void bridgeBleTask(void* parameter) {
             bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS * 1000);
             if (bleClient->connect(addr, false)) {
                 log_i("[Bridge-BLE] Connected! Securing connection...");
-                bleClient->secureConnection();
-
-                delay(2000);
+                // Note: In NimBLE 2.x, secureConnection() (async=false) blocks synchronously
+                // until the SMP encryption handshake either succeeds (returns true) or errors/disconnects (returns false).
+                if (!bleClient->secureConnection()) {
+                    log_e("[Bridge-BLE] BLE authentication/encryption failed! Disconnecting and retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
+                    s_ble_connected.store(false, std::memory_order_relaxed);
+                    bleClient->disconnect();
+                    delay(BLUETOOTH_RECONNECT_DELAY_MS);
+                    continue;
+                }
 
                 NimBLERemoteService* pSvc = bleClient->getService("6ba1b218-15a8-461f-9fa8-5dcae273eafd");
                 if (pSvc) {

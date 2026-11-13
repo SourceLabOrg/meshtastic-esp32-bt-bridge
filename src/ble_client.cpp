@@ -346,31 +346,20 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
         return {false, "Could not connect to BLE device. Ensure it is powered on and within range.", ""};
     }
 
-    // Attempt to make an authenicated/secure connection using the PIN.
+    // Attempt to make an authenticated/secure connection using the PIN.
+    // Note: In NimBLE 2.x, secureConnection() (async=false) blocks synchronously
+    // until the SMP encryption handshake either succeeds (returns true) or errors/disconnects (returns false).
     log_i("[BLE Test] Connected. Requesting secure pairing...");
-    pClient->secureConnection();
+    bool secured = pClient->secureConnection();
 
-    // Wait up to BLUETOOTH_TIMEOUT_SECONDS for authentication handshake to complete
-    unsigned long startAuth = millis();
-    while (millis() - startAuth < (BLUETOOTH_TIMEOUT_SECONDS * 1000)) {
-        if (!pClient->isConnected() || bridgeCallbacks.authFailed) {
-            break;
-        }
-        if (bridgeCallbacks.authCompleted) {
-            break;
-        }
-        delay(100);
-    }
-
-    bool isAuth = pClient->isConnected() && bridgeCallbacks.authCompleted && !bridgeCallbacks.authFailed;
-    if (isAuth) {
-        NimBLEConnInfo connInfo = pClient->getConnInfo();
-        isAuth = connInfo.isEncrypted() || connInfo.isAuthenticated();
-    }
+    NimBLEConnInfo connInfo = pClient->getConnInfo();
+    bool isAuth = secured && pClient->isConnected() && !bridgeCallbacks.authFailed &&
+                  (connInfo.isEncrypted() || connInfo.isAuthenticated());
 
     if (!isAuth) {
         log_e(
-            "[BLE Test] Pairing/Auth rejected: connected=%d, authCompleted=%d, authFailed=%d",
+            "[BLE Test] Pairing/Auth rejected: secured=%d, connected=%d, authCompleted=%d, authFailed=%d",
+            secured,
             pClient->isConnected(),
             bridgeCallbacks.authCompleted,
             bridgeCallbacks.authFailed
