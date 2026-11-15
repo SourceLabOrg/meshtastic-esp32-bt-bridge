@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "bridge.h"
+#include "ble_client.h"
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <NimBLEDevice.h>
@@ -10,6 +11,7 @@
 #include "utils.h"
 #include "mqtt_net.h"
 #include <atomic>
+#include <cstring>
 
 struct BridgePacket {
     uint8_t data[MESHTASTIC_MAX_PACKET_SIZE]; // Max Meshtastic ToRadio envelope / packet size
@@ -66,8 +68,17 @@ static std::vector<ClientContext*> tcpClients;
 static SemaphoreHandle_t tcpClientsMutex = NULL; // Mutex to protect tcpClients vector from concurrent modification
 static std::atomic<size_t> connectedClientsCount{0};
 static bool bridgeRunning = false;
-static String targetBleMac = "";
-static uint32_t targetBlePin = 123456;
+
+/**
+ * Lock-free BLE target configuration and state (zero heap allocation).
+ * s_target_ble_mac is written on Core 0 before releasing s_ble_config_dirty / s_ble_deactivated,
+ * and copied to a local stack buffer on Core 1 after acquiring those atomics.
+ */
+static char s_target_ble_mac[24] = {0};
+static std::atomic<uint32_t> s_target_ble_pin{123456};
+static std::atomic<BleState> s_ble_state{BLE_STATE_NOT_CONFIGURED};
+static std::atomic<bool> s_ble_deactivated{false};
+static std::atomic<bool> s_ble_config_dirty{false};
 
 static NimBLEClient* bleClient = NULL;
 static NimBLERemoteCharacteristic* toRadioChar = NULL;
@@ -195,13 +206,15 @@ static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, 
 class BridgeRuntimeClientCallbacks : public NimBLEClientCallbacks {
 public:
     void onPassKeyEntry(NimBLEConnInfo& connInfo) override {
-        log_i("[Bridge-BLE] Passkey requested, injecting PIN: %06u", targetBlePin);
-        NimBLEDevice::injectPassKey(connInfo, targetBlePin);
+        uint32_t pin = s_target_ble_pin.load(std::memory_order_relaxed);
+        log_i("[Bridge-BLE] Passkey requested, injecting PIN: %06u", pin);
+        NimBLEDevice::injectPassKey(connInfo, pin);
     }
 
     void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t pin) override {
+        uint32_t expectedPin = s_target_ble_pin.load(std::memory_order_relaxed);
         log_i("[Bridge-BLE] Confirming PIN: %06u", pin);
-        NimBLEDevice::injectConfirmPasskey(connInfo, pin == targetBlePin);
+        NimBLEDevice::injectConfirmPasskey(connInfo, pin == expectedPin);
     }
 
     void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
@@ -215,6 +228,9 @@ public:
     void onDisconnect(NimBLEClient* pClient, int reason) override {
         log_w("[Bridge-BLE] BLE client disconnected (reason=%d).", reason);
         s_ble_connected.store(false, std::memory_order_relaxed);
+        if (!s_ble_deactivated.load(std::memory_order_relaxed)) {
+            s_ble_state.store(BLE_STATE_DISCONNECTED, std::memory_order_relaxed);
+        }
         mqtt_net_on_ble_disconnected();
     }
 };
@@ -315,6 +331,23 @@ static bool pollFromRadio() {
 }
 
 /**
+ * Sleeps for up to delayMs in 250ms increments, waking early if the BLE state is
+ * deactivated/activated or if the target BLE configuration is updated.
+ */
+static void waitReconnectDelayOrWake(uint32_t delayMs) {
+    uint32_t startMs = millis();
+    while ((millis() - startMs) < delayMs) {
+        if (s_ble_deactivated.load(std::memory_order_acquire) ||
+            s_ble_config_dirty.load(std::memory_order_acquire) ||
+            !bridgeRunning) {
+            return;
+        }
+        s_ble_state.store(BLE_STATE_DISCONNECTED, std::memory_order_relaxed);
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
+
+/**
  * BLE Task (running on Core 1)
  * This is the task the manages:
  *  - reading data off of the BLE radio and pushing onto the TCP queue.
@@ -324,28 +357,67 @@ static void bridgeBleTask(void* parameter) {
     log_i("[Bridge-BLE] BLE Task started on Core 1");
 
     while (bridgeRunning) {
+        // If explicitly deactivated via WebUI, disconnect on Core 1 and idle until re-activated.
+        if (s_ble_deactivated.load(std::memory_order_acquire)) {
+            if (bleClient && bleClient->isConnected()) {
+                log_i("[Bridge-BLE] Disconnecting active BLE session (deactivated via WebUI)...");
+                bleClient->disconnect();
+            }
+            s_ble_connected.store(false, std::memory_order_relaxed);
+            s_ble_state.store(BLE_STATE_DEACTIVATED, std::memory_order_relaxed);
+            status_led_set(LED_MED_BLINK);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        // If target MAC/PIN was updated via WebUI while connected, disconnect to switch targets.
+        if (s_ble_config_dirty.exchange(false, std::memory_order_acq_rel)) {
+            if (bleClient && bleClient->isConnected()) {
+                log_i("[Bridge-BLE] BLE target config updated, disconnecting current session...");
+                bleClient->disconnect();
+                s_ble_connected.store(false, std::memory_order_relaxed);
+                vTaskDelay(pdMS_TO_TICKS(250));
+                continue;
+            }
+        }
+
         /**
          * If not connected to the BLE device yet, attempt to connect.
          * Blink the status LED appropriately to indicate no BLE connection is active.
          */
         if (!bleClient || !bleClient->isConnected()) {
-            s_ble_connected.store(false, std::memory_order_relaxed);
-            status_led_set(LED_MED_BLINK);
-            log_i("[Bridge-BLE] Attempting to connect to Meshtastic BLE device...");
+            char localMac[sizeof(s_target_ble_mac)];
+            std::atomic_thread_fence(std::memory_order_acquire);
+            strncpy(localMac, s_target_ble_mac, sizeof(localMac) - 1);
+            localMac[sizeof(localMac) - 1] = '\0';
 
-            NimBLEAddress addr = utils_parse_ble_address(targetBleMac);
+            if (localMac[0] == '\0') {
+                s_ble_connected.store(false, std::memory_order_relaxed);
+                s_ble_state.store(BLE_STATE_NOT_CONFIGURED, std::memory_order_relaxed);
+                vTaskDelay(pdMS_TO_TICKS(250));
+                continue;
+            }
+
+            s_ble_connected.store(false, std::memory_order_relaxed);
+            s_ble_state.store(BLE_STATE_CONNECTING, std::memory_order_relaxed);
+            status_led_set(LED_MED_BLINK);
+            log_i("[Bridge-BLE] Attempting to connect to Meshtastic BLE device (%s)...", localMac);
+
+            NimBLEAddress addr = utils_parse_ble_address(localMac);
 
             if (!bleClient) {
-                NimBLEDevice::init("Meshtastic-Bridge");
-                // Set preferred ATT MTU (512) BEFORE connect() so the initial MTU exchange
-                // inside NimBLEClient::connect() negotiates 512 bytes on the first connection.
-                NimBLEDevice::setMTU(BLE_MTU_SIZE);
-                NimBLEDevice::setSecurityAuth(true, true, true);
-                NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_ONLY);
+                // Ensure unified NimBLE stack + scan callback initialization and 512-byte MTU
+                // BEFORE connect() so the initial MTU exchange negotiates 512 bytes on first connect.
+                ble_client_init();
 
                 bleClient = NimBLEDevice::createClient();
-                bleClient->setClientCallbacks(&bridgeCallbacks, false);
             }
+
+            // Re-assert runtime security settings and callbacks before every connection attempt
+            // in case a WebUI "Test Connection" task ran while BLE was deactivated.
+            NimBLEDevice::setSecurityAuth(true, true, true);
+            NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_ONLY);
+            bleClient->setClientCallbacks(&bridgeCallbacks, false);
 
             // NimBLE 2.x setConnectTimeout takes milliseconds
             bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS * 1000);
@@ -357,7 +429,7 @@ static void bridgeBleTask(void* parameter) {
                     log_e("[Bridge-BLE] BLE authentication/encryption failed! Disconnecting and retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
                     s_ble_connected.store(false, std::memory_order_relaxed);
                     bleClient->disconnect();
-                    delay(BLUETOOTH_RECONNECT_DELAY_MS);
+                    waitReconnectDelayOrWake(BLUETOOTH_RECONNECT_DELAY_MS);
                     continue;
                 }
 
@@ -372,6 +444,7 @@ static void bridgeBleTask(void* parameter) {
                         log_d("[Bridge-BLE] Subscribed to FromNum: %d", sub);
                     }
                     s_ble_connected.store(true, std::memory_order_relaxed);
+                    s_ble_state.store(BLE_STATE_CONNECTED, std::memory_order_relaxed);
                     log_i("[Bridge-BLE] BLE setup complete. Bridging active.");
                     status_led_set(LED_SOLID_ON);
                     mqtt_net_on_ble_connected();
@@ -379,11 +452,12 @@ static void bridgeBleTask(void* parameter) {
                     log_w("[Bridge-BLE] Meshtastic service not found!");
                     s_ble_connected.store(false, std::memory_order_relaxed);
                     bleClient->disconnect();
+                    waitReconnectDelayOrWake(BLUETOOTH_RECONNECT_DELAY_MS);
                 }
             } else {
                 s_ble_connected.store(false, std::memory_order_relaxed);
                 log_w("[Bridge-BLE] Connection failed, retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
-                delay(BLUETOOTH_RECONNECT_DELAY_MS);
+                waitReconnectDelayOrWake(BLUETOOTH_RECONNECT_DELAY_MS);
             }
         } else {
             BridgePacket packet;
@@ -550,9 +624,15 @@ void bridge_clear_mqtt_to_ble_queue() {
  * @param ble_mac MAC address of BLE device to connect to.
  * @param ble_pin PIN for BLE device.
  */
-void bridge_init(const String& ble_mac, uint32_t ble_pin) {
-    targetBleMac = ble_mac;
-    targetBlePin = ble_pin;
+void bridge_init(const char* ble_mac, uint32_t ble_pin) {
+    strncpy(s_target_ble_mac, ble_mac ? ble_mac : "", sizeof(s_target_ble_mac) - 1);
+    s_target_ble_mac[sizeof(s_target_ble_mac) - 1] = '\0';
+    s_target_ble_pin.store(ble_pin, std::memory_order_relaxed);
+    s_ble_deactivated.store(false, std::memory_order_relaxed);
+    s_ble_state.store(
+        (s_target_ble_mac[0] != '\0') ? BLE_STATE_DISCONNECTED : BLE_STATE_NOT_CONFIGURED,
+        std::memory_order_release
+    );
 
     /**
      * Queues for passing packets between BLE <--> TCP.
@@ -616,10 +696,77 @@ void bridge_start() {
 }
 
 /**
+ * @return Human-readable static string literal for a BleState enum value (zero heap allocation).
+ */
+const char* bridge_ble_state_to_string(BleState state) {
+    switch (state) {
+        case BLE_STATE_NOT_CONFIGURED: return "Not Configured";
+        case BLE_STATE_DEACTIVATING:   return "Deactivating...";
+        case BLE_STATE_DEACTIVATED:    return "Deactivated";
+        case BLE_STATE_DISCONNECTED:   return "Disconnected";
+        case BLE_STATE_CONNECTING:     return "Connecting...";
+        case BLE_STATE_CONNECTED:      return "Connected";
+        default:                       return "Unknown";
+    }
+}
+
+/**
  * @return True if the BLE device is connected, false if not (wait-free atomic read)
  */
 bool bridge_is_ble_connected() {
     return s_ble_connected.load(std::memory_order_relaxed);
+}
+
+/**
+ * @return Current BleState (wait-free atomic read)
+ */
+BleState bridge_get_ble_state() {
+    return s_ble_state.load(std::memory_order_relaxed);
+}
+
+/**
+ * @return True if the BLE bridge connection loop is active (not deactivated).
+ */
+bool bridge_is_ble_active() {
+    return !s_ble_deactivated.load(std::memory_order_relaxed);
+}
+
+/**
+ * Request activation or deactivation of the BLE bridge connection/retry loop.
+ * Lock-free and non-blocking on Core 0: sets the atomic request flag and state;
+ * bridgeBleTask on Core 1 picks up the flag on its next loop iteration and performs
+ * the actual disconnect and teardown.
+ */
+void bridge_set_ble_active(bool active) {
+    if (!active) {
+        s_ble_deactivated.store(true, std::memory_order_release);
+        if (s_ble_state.load(std::memory_order_relaxed) != BLE_STATE_DEACTIVATED) {
+            s_ble_state.store(BLE_STATE_DEACTIVATING, std::memory_order_relaxed);
+        }
+        log_i("[Bridge-BLE] BLE deactivation requested via WebUI.");
+    } else {
+        std::atomic_thread_fence(std::memory_order_acquire);
+        bool hasMac = (s_target_ble_mac[0] != '\0');
+        s_ble_deactivated.store(false, std::memory_order_release);
+        if (!s_ble_connected.load(std::memory_order_relaxed)) {
+            s_ble_state.store(hasMac ? BLE_STATE_DISCONNECTED : BLE_STATE_NOT_CONFIGURED, std::memory_order_relaxed);
+        }
+        log_i("[Bridge-BLE] BLE connection activated via WebUI.");
+    }
+}
+
+/**
+ * Update the target BLE MAC and PIN at runtime (lock-free, zero heap allocation)
+ * and automatically activate the BLE connection loop.
+ */
+void bridge_update_ble_config(const char* ble_mac, uint32_t ble_pin) {
+    strncpy(s_target_ble_mac, ble_mac ? ble_mac : "", sizeof(s_target_ble_mac) - 1);
+    s_target_ble_mac[sizeof(s_target_ble_mac) - 1] = '\0';
+    s_target_ble_pin.store(ble_pin, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
+
+    s_ble_config_dirty.store(true, std::memory_order_release);
+    bridge_set_ble_active(s_target_ble_mac[0] != '\0');
 }
 
 /**
@@ -640,6 +787,7 @@ BridgeDiagStats bridge_get_diag_stats() {
     stats.ble_task_stack_free_bytes = bridgeBleTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeBleTaskHandle) * sizeof(StackType_t)) : 0;
     stats.net_task_stack_free_bytes = bridgeNetTaskHandle ? (uxTaskGetStackHighWaterMark(bridgeNetTaskHandle) * sizeof(StackType_t)) : 0;
     stats.ble_connected = bridge_is_ble_connected();
+    stats.ble_state = bridge_get_ble_state();
     stats.ble_rx_count = s_ble_rx_count.load(std::memory_order_relaxed);
     stats.ble_tx_count = s_ble_tx_count.load(std::memory_order_relaxed);
     stats.ble_invalid_count = s_ble_invalid_count.load(std::memory_order_relaxed);

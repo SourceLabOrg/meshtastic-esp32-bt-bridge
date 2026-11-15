@@ -77,8 +77,8 @@ flowchart LR
   * In `2.x`, `onPassKeyEntry(NimBLEConnInfo& connInfo)` is invoked on the `nimble_host` task (Core 0) while `bridgeBleTask` or `bleTestTask` (Core 1) is blocked inside `secureConnection()`.
   * Calling `NimBLEDevice::injectPassKey(connInfo, pin)` directly inside `onPassKeyEntry()` immediately invokes `ble_sm_inject_io(connInfo.getConnHandle(), &pkey)` on the host task without blocking or deadlocking.
   * Additionally, in `2.x`, `secureConnection()` (with default `async = false`) blocks synchronously until the SMP encryption handshake either succeeds (`returns true`, after calling `onAuthenticationComplete()`) or errors/disconnects (`returns false`, without calling `onAuthenticationComplete()`). Both `ble_client_test_connection()` (`src/ble_client.cpp`) and `bridgeBleTask` (`src/bridge.cpp`) check the `bool` return value of `secureConnection()` directly rather than polling `authCompleted` in a post-call loop or sleeping `delay(2000)`.
-* **Out-of-Scope Note (WebUI Scan / Test Connection in Normal Mode):**
-  * Triggering a BLE scan or connection test from the WebUI while in Normal Operating Mode (`http://<bridge>.local`) can contend with `bridgeBleTask` on Core 1. This pre-existing behavior is intentionally kept out of scope for the `2.x` upgrade and can be addressed separately if desired.
+* **Follow-Up Resolution (WebUI Scan / Test Connection in Normal Mode):**
+  * Triggering a BLE scan or connection test from the WebUI while in Normal Operating Mode (`http://<bridge>.local`) previously contended with `bridgeBleTask` on Core 1. This was kept out of scope for the `2.x` upgrade PR and subsequently resolved via the explicit Bluetooth `Deactivate` / `Activate` control documented in `docs/feature-ble-deactivate.md`.
 
 ---
 
@@ -134,4 +134,4 @@ flowchart LR
 | 2026-11-13 | Zero-Heap `FromRadio` Read Path & `pollFromRadio()` | Replaced `std::string` conversions on `fromRadioChar->readValue()` with `NimBLEAttValue` and a static byte buffer (`lastPacket[MESHTASTIC_MAX_PACKET_SIZE]`) inside a dedicated `static bool pollFromRadio()` helper using flat early-return guards. Also guarded against oversized payloads (`> MESHTASTIC_MAX_PACKET_SIZE`) before setting `pendingRadioRead = true` to prevent fast-poll spin loops. |
 | 2026-11-13 | Fixed `NimBLEAttValue` Capacity (`512` B) | Added `-D CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512` in `platformio.ini` after code review of `NimBLEAttValue.cpp` revealed its default `20`-byte initial capacity caused `realloc()` fragmentation between `21` bytes (on empty 250ms polls) and $N$ bytes (on packet reads). |
 | 2026-11-13 | Pin Exact Version (`2.5.2`) | Pinned `h2zero/NimBLE-Arduino @ 2.5.2` (without `^`) in `platformio.ini` so future minor/patch upgrades are deliberate and audited against our buffer, timing, and heap assumptions. |
-| 2026-11-13 | WebUI Scan/Test Contention in Normal Mode | Kept out of scope for the `2.x` upgrade to keep changes focused. |
+| 2026-11-13 | WebUI Scan/Test Contention in Normal Mode | Kept out of scope for the `2.x` upgrade to keep changes focused; resolved in follow-up branch `ble-deactivate` (`docs/feature-ble-deactivate.md`). |

@@ -62,6 +62,10 @@ const char index_html[] PROGMEM = R"rawliteral(
   .btn-danger:hover { background-color: #c82333; }
   .btn-edit { width: auto; padding: 6px 16px; font-size: 13px; margin: 0; background-color: #0066cc; color: white; border-radius: 6px; font-weight: 600; }
   .btn-edit:hover { background-color: #0052a3; opacity: 1; }
+  .btn-edit.btn-warning { background-color: #ff9800; }
+  .btn-edit.btn-warning:hover { background-color: #e68a00; }
+  .btn-edit.btn-success { background-color: #28a745; }
+  .btn-edit.btn-success:hover { background-color: #218838; }
   .btn-group { display: flex; gap: 8px; margin-top: 8px; }
   .btn-group button { flex: 1; }
   .password-field { position: relative; display: flex; align-items: center; margin-bottom: 12px; }
@@ -163,7 +167,12 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div class="card" id="card-ble">
     <div class="card-header">
       <div class="card-title">Bluetooth Meshtastic Device</div>
-      <button class="btn-edit" id="btn-edit-ble" onclick="toggleEditBle(true)">Edit</button>
+      <div id="ble-header-actions" style="display:flex; gap:6px; align-items:center;">
+        <button class="btn-edit btn-warning" id="btn-toggle-ble" style="display:none;" onclick="toggleBleActive()">Deactivate</button>
+        <span id="btn-edit-ble-wrap" style="display:inline-block;">
+          <button class="btn-edit" id="btn-edit-ble" onclick="toggleEditBle(true)">Edit</button>
+        </span>
+      </div>
     </div>
     <div id="ble-view">
       <div class="info-row">
@@ -377,6 +386,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     let currentConfig = { wifi_ssid: '', wifi_has_pass: false, ble_mac: '', ble_pin: '' };
     let pollInterval = null;
     let wifiPollInterval = null;
+    let lastBleState = 'Unknown';
+    let isApModeState = false;
 
     function showAlert(id, type, msg) {
       const el = document.getElementById(id);
@@ -444,8 +455,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         statusPollTimer = null;
       }
       const enabled = document.getElementById('sys-live-polling').checked;
-      if (enabled) {
-        statusPollTimer = setTimeout(updateStatus, pollIntervals[pollIntervalIdx]);
+      if (enabled || lastBleState === 'Deactivating...') {
+        const delayMs = (lastBleState === 'Deactivating...') ? 500 : pollIntervals[pollIntervalIdx];
+        statusPollTimer = setTimeout(updateStatus, delayMs);
       }
     }
 
@@ -567,6 +579,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         .then(st => {
           // WiFi Metrics
           if (st.wifi) {
+            isApModeState = !!st.wifi.is_ap_mode;
             const wifiPill = document.getElementById('view-wifi-status-pill');
             if (wifiPill) {
               if (st.wifi.is_ap_mode) {
@@ -607,16 +620,33 @@ const char index_html[] PROGMEM = R"rawliteral(
 
           // BLE Metrics
           if (st.ble) {
+            const bleState = st.ble.state || (st.ble.connected ? 'Connected' : 'Disconnected');
+            lastBleState = bleState;
+
             const blePill = document.getElementById('view-ble-status-pill');
             if (blePill) {
-              if (st.ble.connected) {
+              if (!currentConfig.ble_mac || bleState === 'Not Configured') {
+                blePill.innerText = 'Not Configured';
+                blePill.className = 'status-pill disabled';
+              } else if (bleState === 'Connected') {
                 blePill.innerText = 'Connected';
                 blePill.className = 'status-pill connected';
+              } else if (bleState === 'Connecting...') {
+                blePill.innerText = 'Connecting...';
+                blePill.className = 'status-pill connecting';
+              } else if (bleState === 'Deactivating...') {
+                blePill.innerText = 'Deactivating...';
+                blePill.className = 'status-pill waiting';
+              } else if (bleState === 'Deactivated') {
+                blePill.innerText = 'Deactivated';
+                blePill.className = 'status-pill disabled';
               } else {
                 blePill.innerText = 'Disconnected';
                 blePill.className = 'status-pill error';
               }
             }
+            syncBleHeaderControls();
+
             const bleTx = document.getElementById('view-ble-tx');
             if (bleTx) bleTx.innerText = st.ble.tx_count || 0;
             const bleRx = document.getElementById('view-ble-rx');
@@ -816,6 +846,87 @@ const char index_html[] PROGMEM = R"rawliteral(
         });
     }
 
+    function syncBleHeaderControls() {
+      const btnToggle = document.getElementById('btn-toggle-ble');
+      const btnEdit = document.getElementById('btn-edit-ble');
+      const editWrap = document.getElementById('btn-edit-ble-wrap');
+      if (!btnToggle || !btnEdit || !editWrap) return;
+
+      // In AP Setup Mode or when no BLE device is configured yet, no deactivation is needed
+      if (isApModeState || !currentConfig || !currentConfig.ble_mac) {
+        btnToggle.style.display = 'none';
+        btnEdit.disabled = false;
+        btnEdit.title = '';
+        editWrap.title = '';
+        return;
+      }
+
+      btnToggle.style.display = 'inline-block';
+      if (lastBleState === 'Deactivated') {
+        btnToggle.innerText = 'Activate';
+        btnToggle.className = 'btn-edit btn-success';
+        btnToggle.disabled = false;
+        btnEdit.disabled = false;
+        btnEdit.title = '';
+        editWrap.title = '';
+      } else if (lastBleState === 'Deactivating...') {
+        btnToggle.innerText = 'Deactivating...';
+        btnToggle.className = 'btn-edit btn-warning';
+        btnToggle.disabled = true;
+        btnEdit.disabled = true;
+        const tip = 'Waiting for Bluetooth connection attempt to finish deactivating...';
+        btnEdit.title = tip;
+        editWrap.title = tip;
+      } else {
+        btnToggle.innerText = 'Deactivate';
+        btnToggle.className = 'btn-edit btn-warning';
+        btnToggle.disabled = false;
+        btnEdit.disabled = true;
+        const tip = 'You must deactivate the Bluetooth connection before editing.';
+        btnEdit.title = tip;
+        editWrap.title = tip;
+      }
+    }
+
+    function toggleBleActive() {
+      const btnToggle = document.getElementById('btn-toggle-ble');
+      if (lastBleState === 'Deactivated') {
+        if (btnToggle) btnToggle.disabled = true;
+        fetch('/set_ble_active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'active=true'
+        })
+        .then(() => {
+          setTimeout(updateStatus, 300);
+        })
+        .catch(() => {
+          if (btnToggle) btnToggle.disabled = false;
+        });
+      } else {
+        showModal(
+          'Deactivate Bluetooth',
+          'Deactivating Bluetooth will disconnect the bridge from your Meshtastic radio and stop automatic reconnection until you activate it again, save Bluetooth settings, or reboot the bridge.',
+          'Deactivate',
+          'btn-warning',
+          function() {
+            if (btnToggle) btnToggle.disabled = true;
+            fetch('/set_ble_active', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: 'active=false'
+            })
+            .then(() => {
+              setTimeout(updateStatus, 300);
+            })
+            .catch(() => {
+              if (btnToggle) btnToggle.disabled = false;
+            });
+          }
+        );
+      }
+    }
+
     function toggleEditBle(edit) {
       // Copy current config values back into inputs.
       if (edit && currentConfig) {
@@ -826,11 +937,14 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       document.getElementById('ble-view').style.display = edit ? 'none' : 'block';
       document.getElementById('ble-edit').style.display = edit ? 'block' : 'none';
-      document.getElementById('btn-edit-ble').style.display = edit ? 'none' : 'block';
+      document.getElementById('ble-header-actions').style.display = edit ? 'none' : 'flex';
       hideAlert('ble-scan-alert');
       hideAlert('ble-edit-alert');
       if (edit) {
         scanBle();
+      } else if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
       }
     }
 
@@ -1413,6 +1527,23 @@ void config_ui_start_server() {
         }
     });
 
+    // Activate or Deactivate Bluetooth connection loop at runtime
+    server.on("/set_ble_active", HTTP_POST, [](AsyncWebServerRequest *request){
+        log_d("[WebUI] POST /set_ble_active requested (Client: %s)", request->client()->remoteIP().toString().c_str());
+        if (request->hasParam("active", true)) {
+            bool active = (request->getParam("active", true)->value() == "true");
+            if (!wifi_net_is_ap_mode()) {
+                if (active) {
+                    ble_client_stop_scan();
+                }
+                bridge_set_ble_active(active);
+            }
+            request->send(200, "application/json", "{\"success\":true}");
+        } else {
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing active parameter.\"}");
+        }
+    });
+
     // Save Bluetooth configuration
     server.on("/save_ble", HTTP_POST, [](AsyncWebServerRequest *request){
         log_d("[WebUI] POST /save_ble requested (Client: %s)", request->client()->remoteIP().toString().c_str());
@@ -1423,6 +1554,13 @@ void config_ui_start_server() {
             preferences.putString("ble_name", name);
             preferences.putString("ble_mac", mac);
             preferences.putString("ble_pin", pin);
+
+            // In Normal Operating Mode, apply updated BLE target and automatically activate connection
+            if (!wifi_net_is_ap_mode()) {
+                ble_client_stop_scan();
+                bridge_update_ble_config(mac.c_str(), pin.toInt());
+            }
+
             request->send(200, "application/json", "{\"success\":true}");
         } else {
             request->send(400, "application/json", "{\"success\":false,\"error\":\"Missing ble_mac or ble_pin parameter.\"}");

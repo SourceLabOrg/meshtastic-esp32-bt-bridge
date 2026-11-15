@@ -73,14 +73,14 @@ String utils_escape_json(const String& input) {
 }
 
 /**
- * @param macStr MAC Address to parse
+ * @param macStr Null-terminated MAC Address C-string to parse
  * @return NimBLEAddress configured with the appropriate type and MAC address
  */
-NimBLEAddress utils_parse_ble_address(const String& macStr) {
+NimBLEAddress utils_parse_ble_address(const char* macStr) {
     uint8_t addrType = BLE_ADDR_PUBLIC; // Default to public
 
-    if (macStr.length() > 0) {
-        char firstChar = macStr.charAt(0);
+    if (macStr && macStr[0] != '\0') {
+        char firstChar = macStr[0];
         // Bluetooth Core Specification: Random Static addresses have the two most
         // significant bits set to 1. In hex, this means they start with C, D, E, or F.
         if (firstChar == 'c' || firstChar == 'C' ||
@@ -91,5 +91,5 @@ NimBLEAddress utils_parse_ble_address(const String& macStr) {
         }
     }
 
-    return NimBLEAddress(macStr.c_str(), addrType);
+    return NimBLEAddress(macStr ? macStr : "", addrType);
 }

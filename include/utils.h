@@ -21,4 +21,4 @@ void utils_escape_json_print(Print& out, const char* input);
 void utils_escape_json_print(Print& out, const String& input);
 
 // Parses a MAC string and auto-detects if it is a Public or Random Static BLE address
-NimBLEAddress utils_parse_ble_address(const String& macStr);
+NimBLEAddress utils_parse_ble_address(const char* macStr);

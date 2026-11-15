@@ -64,6 +64,7 @@ meshtastic-esp32-bt-bridge/
 │   ├── bridge_architecture.md # Network & Bridge details
 │   ├── configuration_ui.md# Captive portal design
 │   ├── development.md     # Build guide, queue sizing & release instructions
+│   ├── feature-ble-deactivate.md # BLE Deactivate / Activate control & scan contention fix
 │   ├── feature-mqtt-proxy.md # Standalone MQTT Gateway & Proxy architecture
 │   ├── feature-prometheus-metrics.md # Prometheus / OpenMetrics scraper specification
 │   ├── feature-webui-metrics.md # Live Diagnostic Metrics in WebUI

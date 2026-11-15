@@ -33,12 +33,12 @@ SystemTelemetrySnapshot diag_telemetry_get_snapshot() {
 
 void diag_telemetry_format_serial(const SystemTelemetrySnapshot& s, char* buf, size_t maxLen) {
     snprintf(buf, maxLen,
-             "[Diag] Heap: %u KB (Min: %u KB, MaxBlock: %u KB) | WiFi: %d dBm | TCP: %zu | "
+             "[Diag] Heap: %u KB (Min: %u KB, MaxBlock: %u KB) | WiFi: %d dBm | BLE: %s | TCP: %zu | "
              "Traffic: [BLE Rx:%u/Tx:%u (inv:%u), TCP Rx:%u/Tx:%u (inv:%u), MQTT Rx:%u/Tx:%u (inv:%u)] | "
              "Queues: [T->B: %zu/%zu (d:%u), B->T: %zu/%zu (d:%u), M->B: %zu/%zu (d:%u)] | "
              "Stacks: [BLE: %u B, Net: %u B] | MQTT: %s",
              s.heap_free_bytes / 1024, s.heap_min_free_bytes / 1024, s.heap_max_alloc_bytes / 1024,
-             (int)s.wifi_rssi, s.bridge.connected_tcp_clients,
+             (int)s.wifi_rssi, bridge_ble_state_to_string(s.bridge.ble_state), s.bridge.connected_tcp_clients,
              s.bridge.ble_rx_count, s.bridge.ble_tx_count, s.bridge.ble_invalid_count,
              s.bridge.tcp_rx_count, s.bridge.tcp_tx_count, s.bridge.tcp_invalid_count,
              s.mqtt.msgs_received, s.mqtt.msgs_published, s.mqtt.msgs_invalid,
@@ -76,7 +76,9 @@ void diag_telemetry_format_json(const SystemTelemetrySnapshot& s, Print& out) {
     utils_escape_json_print(out, s.mdns_host);
     out.print("\"},\"ble\":{\"connected\":");
     out.print(s.bridge.ble_connected ? "true" : "false");
-    out.print(",\"rx_count\":");
+    out.print(",\"state\":\"");
+    out.print(bridge_ble_state_to_string(s.bridge.ble_state));
+    out.print("\",\"rx_count\":");
     out.print(s.bridge.ble_rx_count);
     out.print(",\"tx_count\":");
     out.print(s.bridge.ble_tx_count);
