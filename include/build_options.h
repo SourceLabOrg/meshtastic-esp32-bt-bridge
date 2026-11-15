@@ -73,6 +73,17 @@
 #define BLUETOOTH_MAX_DEVICES_DISCOVERABLE 60
 #endif
 
+// Preferred BLE ATT MTU size (in bytes) negotiated with the Meshtastic radio.
+#ifndef BLE_MTU_SIZE
+#define BLE_MTU_SIZE 512
+#endif
+
+// Minimum interval (in milliseconds) between consecutive BLE ToRadio writes.
+// Prevents non-blocking Write Without Response bursts from exhausting NimBLE's msys_1 buffers.
+#ifndef BLE_WRITE_PACING_MS
+#define BLE_WRITE_PACING_MS 12
+#endif
+
 // -----------------------------------------
 // Wifi Settings
 // -----------------------------------------

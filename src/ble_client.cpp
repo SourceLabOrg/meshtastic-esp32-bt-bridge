@@ -30,6 +30,18 @@ static std::atomic<bool> isScanningFlag{false};
 static String lastScanError = "";
 
 /**
+ * Callbacks invoked by NimBLE when an asynchronous BLE scan completes.
+ */
+class ScanCallbacks : public NimBLEScanCallbacks {
+    void onScanEnd(const NimBLEScanResults& results, int reason) override {
+        isScanningFlag = false;
+        log_i("[BLE] Scan finished (reason=%d). Found %d device(s).", reason, results.getCount());
+    }
+};
+
+static ScanCallbacks scanCallbacks;
+
+/**
  * Initialize bluetooth radio.
  */
 void ble_client_init() {
@@ -38,12 +50,13 @@ void ble_client_init() {
         return;
     }
     NimBLEDevice::init("Meshtastic-Bridge");
+    NimBLEDevice::setMTU(BLE_MTU_SIZE);
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
-    pScan->setActiveScan(true);       // Active scan requests scan response packets to get device names
-    pScan->setInterval(100);          // 100ms scan interval
-    pScan->setWindow(99);             // 99ms scan window
-    pScan->setDuplicateFilter(true);  // Filter duplicate advertisements during a single scan
+    pScan->setScanCallbacks(&scanCallbacks, false); // wantDuplicates = false (enables duplicate filter)
+    pScan->setActiveScan(true);                     // Active scan requests scan response packets to get device names
+    pScan->setInterval(100);                        // 100ms scan interval
+    pScan->setWindow(99);                           // 99ms scan window
 
     isInitialized = true;
     log_i("[BLE] Client initialized.");
@@ -74,12 +87,9 @@ void ble_client_start_scan() {
     lastScanError = "";
     isScanningFlag = true;
 
-    // Start asynchronous scan for BLUETOOTH_SCAN_TIME_SECONDS
+    // Start asynchronous scan for BLUETOOTH_SCAN_TIME_SECONDS (NimBLE 2.x takes milliseconds)
     log_i("[BLE] Starting scan (%d seconds)...", BLUETOOTH_SCAN_TIME_SECONDS);
-    bool started = pScan->start(BLUETOOTH_SCAN_TIME_SECONDS, [](NimBLEScanResults results) {
-        isScanningFlag = false;
-        log_i("[BLE] Scan finished. Found %d device(s).", results.getCount());
-    }, false);
+    bool started = pScan->start(BLUETOOTH_SCAN_TIME_SECONDS * 1000, false, true);
 
     if (!started) {
         isScanningFlag = false;
@@ -163,10 +173,13 @@ String ble_client_get_scan_results_json() {
     devices.reserve(count);
 
     for (int i = 0; i < count; i++) {
-        NimBLEAdvertisedDevice device = results.getDevice(i);
-        String name = String(device.getName().c_str());
-        String mac = String(device.getAddress().toString().c_str());
-        int rssi = device.getRSSI();
+        const NimBLEAdvertisedDevice* device = results.getDevice(i);
+        if (!device) {
+            continue;
+        }
+        String name = String(device->getName().c_str());
+        String mac = String(device->getAddress().toString().c_str());
+        int rssi = device->getRSSI();
 
         // Skip devices with empty MAC address.
         if (mac.isEmpty()) {
@@ -248,26 +261,26 @@ public:
         authFailed = false;
     }
 
-    uint32_t onPassKeyRequest() override {
+    void onPassKeyEntry(NimBLEConnInfo& connInfo) override {
         passkeyPrompted = true;
-        log_i("[BLE] Passkey requested by server, providing PIN: %06u", activePasskey);
-        return activePasskey;
+        log_i("[BLE] Passkey requested by server, injecting PIN: %06u", activePasskey);
+        NimBLEDevice::injectPassKey(connInfo, activePasskey);
     }
 
-    bool onConfirmPIN(uint32_t pin) override {
+    void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t pin) override {
         passkeyPrompted = true;
         log_i("[BLE] Confirming PIN: %06u", pin);
-        return (pin == activePasskey);
+        NimBLEDevice::injectConfirmPasskey(connInfo, pin == activePasskey);
     }
 
-    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
         authCompleted = true;
-        authFailed = !desc->sec_state.encrypted;
+        authFailed = !connInfo.isEncrypted();
         log_i(
             "[BLE] Authentication complete. Encrypted: %d, Authenticated: %d, Bonded: %d\n",
-            desc->sec_state.encrypted,
-            desc->sec_state.authenticated,
-            desc->sec_state.bonded
+            connInfo.isEncrypted(),
+            connInfo.isAuthenticated(),
+            connInfo.isBonded()
         );
     }
 };
@@ -317,8 +330,8 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
 
     pClient->setClientCallbacks(&bridgeCallbacks, false);
 
-    // Set how long to wait for successful connection.
-    pClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS);
+    // Set how long to wait for successful connection (NimBLE 2.x takes milliseconds).
+    pClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS * 1000);
 
     log_i("[BLE Test] Connecting to peripheral...");
 
@@ -333,31 +346,20 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
         return {false, "Could not connect to BLE device. Ensure it is powered on and within range.", ""};
     }
 
-    // Attempt to make an authenicated/secure connection using the PIN.
+    // Attempt to make an authenticated/secure connection using the PIN.
+    // Note: In NimBLE 2.x, secureConnection() (async=false) blocks synchronously
+    // until the SMP encryption handshake either succeeds (returns true) or errors/disconnects (returns false).
     log_i("[BLE Test] Connected. Requesting secure pairing...");
-    pClient->secureConnection();
+    bool secured = pClient->secureConnection();
 
-    // Wait up to BLUETOOTH_TIMEOUT_SECONDS for authentication handshake to complete
-    unsigned long startAuth = millis();
-    while (millis() - startAuth < (BLUETOOTH_TIMEOUT_SECONDS * 1000)) {
-        if (!pClient->isConnected() || bridgeCallbacks.authFailed) {
-            break;
-        }
-        if (bridgeCallbacks.authCompleted) {
-            break;
-        }
-        delay(100);
-    }
-
-    bool isAuth = pClient->isConnected() && bridgeCallbacks.authCompleted && !bridgeCallbacks.authFailed;
-    if (isAuth) {
-        NimBLEConnInfo connInfo = pClient->getConnInfo();
-        isAuth = connInfo.isEncrypted() || connInfo.isAuthenticated();
-    }
+    NimBLEConnInfo connInfo = pClient->getConnInfo();
+    bool isAuth = secured && pClient->isConnected() && !bridgeCallbacks.authFailed &&
+                  (connInfo.isEncrypted() || connInfo.isAuthenticated());
 
     if (!isAuth) {
         log_e(
-            "[BLE Test] Pairing/Auth rejected: connected=%d, authCompleted=%d, authFailed=%d",
+            "[BLE Test] Pairing/Auth rejected: secured=%d, connected=%d, authCompleted=%d, authFailed=%d",
+            secured,
             pClient->isConnected(),
             bridgeCallbacks.authCompleted,
             bridgeCallbacks.authFailed

@@ -194,32 +194,125 @@ static void notifyFromNum(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, 
 // Custom BLE Client Callbacks to handle PIN authentication and disconnects
 class BridgeRuntimeClientCallbacks : public NimBLEClientCallbacks {
 public:
-    uint32_t onPassKeyRequest() override {
-        log_i("[Bridge-BLE] Passkey requested, providing PIN: %06u", targetBlePin);
-        return targetBlePin;
+    void onPassKeyEntry(NimBLEConnInfo& connInfo) override {
+        log_i("[Bridge-BLE] Passkey requested, injecting PIN: %06u", targetBlePin);
+        NimBLEDevice::injectPassKey(connInfo, targetBlePin);
     }
 
-    bool onConfirmPIN(uint32_t pin) override {
+    void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t pin) override {
         log_i("[Bridge-BLE] Confirming PIN: %06u", pin);
-        return (pin == targetBlePin);
+        NimBLEDevice::injectConfirmPasskey(connInfo, pin == targetBlePin);
     }
 
-    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
         log_i(
             "[Bridge-BLE] Authentication complete. Encrypted: %d, Authenticated: %d",
-            desc->sec_state.encrypted,
-            desc->sec_state.authenticated
+            connInfo.isEncrypted(),
+            connInfo.isAuthenticated()
         );
     }
 
-    void onDisconnect(NimBLEClient* pClient) override {
-        log_w("[Bridge-BLE] BLE client disconnected.");
+    void onDisconnect(NimBLEClient* pClient, int reason) override {
+        log_w("[Bridge-BLE] BLE client disconnected (reason=%d).", reason);
         s_ble_connected.store(false, std::memory_order_relaxed);
         mqtt_net_on_ble_disconnected();
     }
 };
 
 static BridgeRuntimeClientCallbacks bridgeCallbacks;
+
+/**
+ * Polls the Meshtastic FromRadio characteristic when notified by FromNum or when the
+ * 250ms failsafe interval elapses.
+ *
+ * Uses NimBLE 2.x's NimBLEAttValue and a static byte buffer to avoid any heap allocations
+ * on Core 1.
+ *
+ * @return true if a new packet was read and processed (indicating more packets may be
+ *         queued in the radio), false otherwise.
+ */
+static bool pollFromRadio() {
+    static unsigned long lastFailsafe = 0;
+    static uint8_t lastPacket[MESHTASTIC_MAX_PACKET_SIZE];
+    static size_t lastPacketLen = 0;
+    static unsigned long lastPacketTime = 0;
+
+    // If we have no connected TCP clients and aren't running the MQTT broker proxy,
+    // skip polling FromRadio so packets remain queued on the radio.
+    if (!fromRadioChar || (connectedClientsCount.load() == 0 && !mqtt_net_is_enabled())) {
+        return false;
+    }
+
+    // Only read if notified by FromNum, or if 250ms have elapsed since the last check (failsafe)
+    if (!pendingRadioRead && (millis() - lastFailsafe <= 250)) {
+        return false;
+    }
+
+    bool wasNotified = pendingRadioRead; // Capture before clearing!
+    pendingRadioRead = false;
+    lastFailsafe = millis();
+
+    NimBLEAttValue currentVal = fromRadioChar->readValue();
+    size_t currentLen = currentVal.size();
+    const uint8_t* currentData = currentVal.data();
+
+    // In Meshtastic's BLE state machine, reading FromRadio pops one packet off the radio's
+    // internal FIFO queue. When the queue is empty (or during an idle 250ms failsafe poll),
+    // readValue() returns 0 bytes; returning false leaves pendingRadioRead == false and
+    // terminates the fast-poll drain burst.
+    if (currentLen == 0) {
+        return false;
+    }
+
+    if (currentLen > MESHTASTIC_MAX_PACKET_SIZE) {
+        log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes > %d)", currentLen, MESHTASTIC_MAX_PACKET_SIZE);
+        s_ble_invalid_count.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    bool isDifferent = (currentLen != lastPacketLen) ||
+                       (memcmp(currentData, lastPacket, currentLen) != 0);
+
+    // Accept the packet if it's different, OR if the radio explicitly notified us it was new,
+    // OR if 2.5 seconds have passed (failsafe for dropped identical heartbeat notifications)
+    if (!isDifferent && !wasNotified && (millis() - lastPacketTime <= 2500)) {
+        return false;
+    }
+
+    memcpy(lastPacket, currentData, currentLen);
+    lastPacketLen = currentLen;
+    lastPacketTime = millis();
+
+    log_d("[Bridge-BLE] Fast-Polled %zu new bytes from FromRadio!", currentLen);
+    s_ble_rx_count.fetch_add(1, std::memory_order_relaxed);
+
+    /*
+     * Pass the raw packet to the MQTT subsystem to determine if it's relevant:
+     *   - Discovers and auto-syncs ModuleConfig.mqtt settings from the radio.
+     *   - Publishes MqttClientProxyMessage uplink packets to the active MQTT broker.
+     *
+     * Returns true if consumed exclusively by MQTT, false if it should be forwarded to TCP clients.
+     */
+    bool consumedByMqtt = mqtt_net_handle_from_radio(currentData, currentLen);
+
+    /*
+     * Only forward the packet to the TCP queue if:
+     *  - It was NOT an internal MQTT proxy message (prevents echoing raw MQTT packets to apps over the TCP socket).
+     *  - There is at least one active TCP client connected (prevents filling the queue).
+     */
+    if (!consumedByMqtt && connectedClientsCount.load() > 0) {
+        BridgePacket rx_packet;
+        rx_packet.len = currentLen;
+        memcpy(rx_packet.data, currentData, rx_packet.len);
+        // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
+        if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
+            log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
+            s_ble_to_tcp_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    return true;
+}
 
 /**
  * BLE Task (running on Core 1)
@@ -244,6 +337,9 @@ static void bridgeBleTask(void* parameter) {
 
             if (!bleClient) {
                 NimBLEDevice::init("Meshtastic-Bridge");
+                // Set preferred ATT MTU (512) BEFORE connect() so the initial MTU exchange
+                // inside NimBLEClient::connect() negotiates 512 bytes on the first connection.
+                NimBLEDevice::setMTU(BLE_MTU_SIZE);
                 NimBLEDevice::setSecurityAuth(true, true, true);
                 NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_ONLY);
 
@@ -251,15 +347,19 @@ static void bridgeBleTask(void* parameter) {
                 bleClient->setClientCallbacks(&bridgeCallbacks, false);
             }
 
-            bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS);
+            // NimBLE 2.x setConnectTimeout takes milliseconds
+            bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS * 1000);
             if (bleClient->connect(addr, false)) {
                 log_i("[Bridge-BLE] Connected! Securing connection...");
-                bleClient->secureConnection();
-
-                delay(2000);
-
-                // Request larger MTU for large protobuf packets
-                NimBLEDevice::setMTU(512);
+                // Note: In NimBLE 2.x, secureConnection() (async=false) blocks synchronously
+                // until the SMP encryption handshake either succeeds (returns true) or errors/disconnects (returns false).
+                if (!bleClient->secureConnection()) {
+                    log_e("[Bridge-BLE] BLE authentication/encryption failed! Disconnecting and retrying in %d ms...", BLUETOOTH_RECONNECT_DELAY_MS);
+                    s_ble_connected.store(false, std::memory_order_relaxed);
+                    bleClient->disconnect();
+                    delay(BLUETOOTH_RECONNECT_DELAY_MS);
+                    continue;
+                }
 
                 NimBLERemoteService* pSvc = bleClient->getService("6ba1b218-15a8-461f-9fa8-5dcae273eafd");
                 if (pSvc) {
@@ -287,33 +387,42 @@ static void bridgeBleTask(void* parameter) {
             }
         } else {
             BridgePacket packet;
-            // If we have a pending read from the radio, do not sleep at all (0 ticks).
-            // Otherwise, wait up to 10ms for incoming high-priority TCP packets.
+            static unsigned long lastBleWriteMs = 0;
+
+            // Enforce a minimum inter-write pacing interval (BLE_WRITE_PACING_MS = 12ms, ~83 pkt/s)
+            // independent of whether a FromRadio read is currently pending.
             //
-            // IMPORTANT BLE PACING NOTE:
-            // When tcp_to_ble_queue is empty, this 10ms wait (+ 1ms vTaskDelay at the bottom of the loop)
-            // intentionally paces mqtt_to_ble_queue drains to ~1 packet every 11ms (~90 pkt/s).
+            // IMPORTANT BLE PACING & MSYS_1 BUFFER NOTE:
             // Because Meshtastic's ToRadio characteristic uses Write Without Response (writeValue(..., false)),
             // NimBLE's ble_gattc_write_no_rsp_flat() is non-blocking and buffers outbound writes inside
-            // NimBLE's internal msys_1 / ACL buffer pools (CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT = 12 blocks of 255B).
-            // Removing this 10ms wait would blast queued MQTT bursts into NimBLE at 1ms intervals (1000 pkt/s),
-            // instantly exhausting NimBLE's 12 msys_1 buffers (BLE_HS_ENOMEM) and overrunning the radio's
-            // internal ToRadio protobuf buffer.
-            TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
+            // NimBLE's internal msys_1 mbuf pool (CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT = 24 blocks of 255B).
+            // With an negotiated MTU of 512 bytes, a single >255B packet chains 2-3 msys_1 blocks.
+            // During simultaneous bidirectional traffic (when pendingRadioRead == true) or multi-packet TCP bursts,
+            // waitTicks is 0 so FromRadio reads are not delayed. Gating outbound queue drains on canWriteNow
+            // prevents back-to-back writes at 1ms intervals from exhausting msys_1 (BLE_HS_ENOMEM) or overrunning
+            // the radio's ToRadio buffer, while still allowing FromRadio reads to execute immediately at 0ms delay.
+            bool canWriteNow = (millis() - lastBleWriteMs) >= BLE_WRITE_PACING_MS;
             bool hasPacket = false;
 
-            // High Priority: App / TCP commands and direct chat messages are checked first.
-            if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
-                hasPacket = true;
-            }
-            // Normal Priority: Background MQTT downlink packets are checked after the 10ms TCP window
-            else if (xQueueReceive(mqtt_to_ble_queue, &packet, 0) == pdTRUE) {
-                hasPacket = true;
+            if (canWriteNow) {
+                // If we have a pending read from the radio, do not block waiting on the TCP queue (0 ticks).
+                // Otherwise, wait up to 10ms for incoming high-priority TCP packets before checking MQTT.
+                TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
+
+                // High Priority: App / TCP commands and direct chat messages are checked first.
+                if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
+                    hasPacket = true;
+                }
+                // Normal Priority: Background MQTT downlink packets are checked after the TCP window.
+                else if (xQueueReceive(mqtt_to_ble_queue, &packet, 0) == pdTRUE) {
+                    hasPacket = true;
+                }
             }
 
             if (hasPacket) {
+                lastBleWriteMs = millis();
                 log_d("[Bridge-BLE] Writing %zu bytes to ToRadio...", packet.len);
-                if (toRadioChar && toRadioChar->canWrite()) {
+                if (toRadioChar && (toRadioChar->canWriteNoResponse() || toRadioChar->canWrite())) {
                     // Meshtastic ToRadio expects Write Without Response (false)
                     bool success = toRadioChar->writeValue(packet.data, packet.len, false);
                     if (success) {
@@ -329,73 +438,10 @@ static void bridgeBleTask(void* parameter) {
                 }
             }
 
-            static unsigned long lastFailsafe = 0;
-            /**
-             * If we have no connected clients, and aren't running a mqtt broker proxy,
-             * then we can skip processing messages from the connected bluetooth device.
-             *
-             * If we have a connected client, we should push messages as they come in to them.
-             * If we are running a mqtt broker proxy, we need to process messages for it.
-             */
-            if (fromRadioChar && (connectedClientsCount.load() > 0 || mqtt_net_is_enabled())) {
-                // Read if notified, or if it's been 250ms since last check (failsafe)
-                bool doRead = pendingRadioRead || (millis() - lastFailsafe > 250);
-
-                if (doRead) {
-                    bool wasNotified = pendingRadioRead; // Capture this before clearing it!
-                    pendingRadioRead = false;
-                    lastFailsafe = millis();
-
-                    static std::string lastPacket = "";
-                    static unsigned long lastPacketTime = 0;
-                    std::string currentVal = fromRadioChar->readValue();
-
-                    // Accept the packet if it's different, OR if the radio explicitly notified us it was new,
-                    // OR if 2.5 seconds have passed (failsafe for dropped identical heartbeat notifications)
-                    if (currentVal.length() > 0 && (currentVal != lastPacket || wasNotified || (millis() - lastPacketTime > 2500))) {
-                        lastPacket = currentVal;
-                        lastPacketTime = millis();
-
-                        log_d("[Bridge-BLE] Fast-Polled %d new bytes from FromRadio!", currentVal.length());
-                        s_ble_rx_count.fetch_add(1, std::memory_order_relaxed);
-
-                        /*
-                         * Pass the raw packet to the MQTT subsystem to determine if its relevant to it or not.
-                         * This is used to:
-                         *   - Discover and auto-syncs ModuleConfig.mqtt settings from the radio.
-                         *   - Publishes MqttClientProxyMessage uplink packets to the active MQTT broker.
-                         *
-                         *  Returns true if it consumed it, and doesn't need further processing here.
-                         *  Returns false if it needs to be processed here further.
-                         */
-                        bool consumedByMqtt = mqtt_net_handle_from_radio((const uint8_t*)currentVal.data(), currentVal.length());
-
-                        /*
-                         * Only forward the packet to the TCP queue if:
-                         *  - It was NOT an internal MQTT proxy message (prevents echoing raw MQTT packets to apps over the tcp socket).
-                         *  - There is at least one active TCP client connected (prevents filling the queue).
-                         */
-                        if (!consumedByMqtt && connectedClientsCount.load() > 0) {
-                            BridgePacket rx_packet;
-                            rx_packet.len = currentVal.length();
-                            if (rx_packet.len <= sizeof(rx_packet.data)) {
-                                memcpy(rx_packet.data, currentVal.data(), rx_packet.len);
-                                // Apply backpressure: Wait up to 50ms if the queue is full so we don't drop packets!
-                                if (xQueueSend(ble_to_tcp_queue, &rx_packet, pdMS_TO_TICKS(50)) != pdTRUE) {
-                                    log_e("[Bridge-BLE] CRITICAL: ble_to_tcp_queue FULL! Dropped %zu bytes", rx_packet.len);
-                                    s_ble_to_tcp_dropped.fetch_add(1, std::memory_order_relaxed);
-                                }
-                            } else {
-                                log_e("[Bridge-BLE] ERROR: Radio Payload too large (%zu bytes)", rx_packet.len);
-                                s_ble_invalid_count.fetch_add(1, std::memory_order_relaxed);
-                            }
-                        }
-
-                        // We successfully pulled a NEW packet! There might be more packets
-                        // waiting in the queue. Flag it to instantly read again on the next loop!
-                        pendingRadioRead = true;
-                    }
-                }
+            if (pollFromRadio()) {
+                // We successfully pulled a NEW packet! There might be more packets
+                // waiting in the radio's queue. Flag it to instantly read again on the next loop!
+                pendingRadioRead = true;
             }
 
             // Always yield at least 1ms to allow equal-priority tasks on Core 1 (like Arduino loopTask) to run

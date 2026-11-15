@@ -67,6 +67,7 @@ meshtastic-esp32-bt-bridge/
 │   ├── feature-mqtt-proxy.md # Standalone MQTT Gateway & Proxy architecture
 │   ├── feature-prometheus-metrics.md # Prometheus / OpenMetrics scraper specification
 │   ├── feature-webui-metrics.md # Live Diagnostic Metrics in WebUI
+│   ├── nimble-2x-upgrade.md # NimBLE-Arduino 2.x upgrade plan & research
 │   └── user_guide.md      # End-user manual and LED reference
 ├── include/               # Header files
 │   ├── bridge.h
