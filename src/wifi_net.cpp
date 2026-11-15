@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #include "wifi_net.h"
 #include "config_ui.h"
 #include "bridge.h"

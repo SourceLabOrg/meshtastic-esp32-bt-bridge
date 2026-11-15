@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #include "config_ui.h"
 #include "ble_client.h"
 #include "wifi_net.h"
@@ -130,7 +133,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
       <div class="info-row">
         <span class="info-label">Traffic:</span>
-        <span class="info-val">▲ <span id="view-tcp-tx">0</span> sent / ▼ <span id="view-tcp-rx">0</span> rcvd · <span id="view-tcp-inv">0</span> invalid</span>
+        <span class="info-val">▲ <span id="view-tcp-tx">0</span> sent / ▼ <span id="view-tcp-rx">0</span> rcvd · <span title="Packets rejected due to malformed TCP framing, oversized payloads, or full client socket buffers."><span id="view-tcp-inv">0</span> invalid</span></span>
       </div>
     </div>
     <div id="wifi-edit" style="display:none;">
@@ -177,7 +180,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
       <div class="info-row">
         <span class="info-label">Traffic:</span>
-        <span class="info-val">▲ <span id="view-ble-tx">0</span> sent / ▼ <span id="view-ble-rx">0</span> rcvd · <span id="view-ble-inv">0</span> invalid</span>
+        <span class="info-val">▲ <span id="view-ble-tx">0</span> sent / ▼ <span id="view-ble-rx">0</span> rcvd · <span title="Packets rejected due to oversized radio payloads or failed BLE writes to the radio."><span id="view-ble-inv">0</span> invalid</span></span>
       </div>
     </div>
     <div id="ble-edit" style="display:none;">
@@ -240,7 +243,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         </div>
         <div class="info-row">
           <span class="info-label">Traffic:</span>
-          <span class="info-val">▲ <span id="view-mqtt-tx">0</span> sent / ▼ <span id="view-mqtt-rx">0</span> rcvd · <span id="view-mqtt-inv">0</span> invalid</span>
+          <span class="info-val">▲ <span id="view-mqtt-tx">0</span> sent / ▼ <span id="view-mqtt-rx">0</span> rcvd · <span title="Downlink messages rejected due to oversized MQTT topic/payload or Protobuf encoding failure."><span id="view-mqtt-inv">0</span> invalid</span></span>
         </div>
       </div>
     </div>
@@ -317,7 +320,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="queue-box">
       <div class="queue-header">
         <span>TCP ➔ BLE Queue:</span>
-        <span class="queue-stats" id="view-queue-t2b-text">0 / 32 (0%) · 0 drops</span>
+        <span class="queue-stats"><span id="view-queue-t2b-text">0 / 32 (0%)</span> · <span title="Valid TCP packets dropped because the TCP-to-BLE queue buffer was full."><span id="view-queue-t2b-drops">0</span> drops</span></span>
       </div>
       <div class="progress-track"><div id="view-queue-t2b-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
     </div>
@@ -325,7 +328,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="queue-box">
       <div class="queue-header">
         <span>BLE ➔ TCP Queue:</span>
-        <span class="queue-stats" id="view-queue-b2t-text">0 / 32 (0%) · 0 drops</span>
+        <span class="queue-stats"><span id="view-queue-b2t-text">0 / 32 (0%)</span> · <span title="Valid BLE packets dropped because the BLE-to-TCP queue buffer was full."><span id="view-queue-b2t-drops">0</span> drops</span></span>
       </div>
       <div class="progress-track"><div id="view-queue-b2t-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
     </div>
@@ -333,7 +336,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="queue-box">
       <div class="queue-header">
         <span>MQTT ➔ BLE Queue:</span>
-        <span class="queue-stats" id="view-queue-m2b-text">0 / 16 (0%) · 0 drops</span>
+        <span class="queue-stats"><span id="view-queue-m2b-text">0 / 16 (0%)</span> · <span title="Valid MQTT downlink packets dropped because the MQTT-to-BLE queue buffer was full."><span id="view-queue-m2b-drops">0</span> drops</span></span>
       </div>
       <div class="progress-track"><div id="view-queue-m2b-bar" class="progress-fill progress-green" style="width:0%;"></div></div>
     </div>
@@ -354,7 +357,8 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   <div class="footer">
     Firmware Version: )rawliteral" FIRMWARE_VERSION R"rawliteral(<br>
-    <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(" target="_blank">View Project on GitHub</a>
+    <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(" target="_blank">View Project on GitHub</a><br>
+    &copy; )rawliteral" COPYRIGHT_YEAR R"rawliteral( SourceLab.org &middot; <a href=")rawliteral" PROJECT_GITHUB_URL R"rawliteral(/blob/main/LICENSE" target="_blank">MIT License</a>
   </div>
 
   <!-- Custom In-DOM Modal for Captive Portal compatibility (macOS/iOS CNA) -->
@@ -408,13 +412,17 @@ const char index_html[] PROGMEM = R"rawliteral(
       return s + 's';
     }
 
-    function renderProgressBar(barId, textId, waiting, capacity, dropped) {
+    function renderProgressBar(barId, textId, dropsId, waiting, capacity, dropped) {
       const cap = capacity || 1;
       const pct = Math.min(100, Math.max(0, Math.round((waiting / cap) * 100)));
       const barEl = document.getElementById(barId);
       const textEl = document.getElementById(textId);
+      const dropsEl = document.getElementById(dropsId);
       if (textEl) {
-        textEl.innerText = waiting + ' / ' + cap + ' (' + pct + '%) · ' + (dropped || 0) + ' drops';
+        textEl.innerText = waiting + ' / ' + cap + ' (' + pct + '%)';
+      }
+      if (dropsEl) {
+        dropsEl.innerText = (dropped || 0);
       }
       if (barEl) {
         barEl.style.width = pct + '%';
@@ -689,13 +697,13 @@ const char index_html[] PROGMEM = R"rawliteral(
           // Queues
           if (st.queues) {
             if (st.queues.tcp_to_ble) {
-              renderProgressBar('view-queue-t2b-bar', 'view-queue-t2b-text', st.queues.tcp_to_ble.waiting, st.queues.tcp_to_ble.capacity, st.queues.tcp_to_ble.dropped);
+              renderProgressBar('view-queue-t2b-bar', 'view-queue-t2b-text', 'view-queue-t2b-drops', st.queues.tcp_to_ble.waiting, st.queues.tcp_to_ble.capacity, st.queues.tcp_to_ble.dropped);
             }
             if (st.queues.ble_to_tcp) {
-              renderProgressBar('view-queue-b2t-bar', 'view-queue-b2t-text', st.queues.ble_to_tcp.waiting, st.queues.ble_to_tcp.capacity, st.queues.ble_to_tcp.dropped);
+              renderProgressBar('view-queue-b2t-bar', 'view-queue-b2t-text', 'view-queue-b2t-drops', st.queues.ble_to_tcp.waiting, st.queues.ble_to_tcp.capacity, st.queues.ble_to_tcp.dropped);
             }
             if (st.queues.mqtt_to_ble) {
-              renderProgressBar('view-queue-m2b-bar', 'view-queue-m2b-text', st.queues.mqtt_to_ble.waiting, st.queues.mqtt_to_ble.capacity, st.queues.mqtt_to_ble.dropped);
+              renderProgressBar('view-queue-m2b-bar', 'view-queue-m2b-text', 'view-queue-m2b-drops', st.queues.mqtt_to_ble.waiting, st.queues.mqtt_to_ble.capacity, st.queues.mqtt_to_ble.dropped);
             }
           }
         })

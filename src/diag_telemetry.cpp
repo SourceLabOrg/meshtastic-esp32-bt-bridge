@@ -1,3 +1,6 @@
+// Copyright (c) 2026 SourceLab.org (https://github.com/SourceLabOrg/meshtastic-esp32-bt-bridge)
+// SPDX-License-Identifier: MIT
+
 #include "diag_telemetry.h"
 #include "bridge.h"
 #include "mqtt_net.h"

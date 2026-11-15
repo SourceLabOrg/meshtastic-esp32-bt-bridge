@@ -42,9 +42,11 @@ jobs:
       - name: Inject Version into Firmware
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          echo "Injecting version: $VERSION"
-          # Find and replace the FIRMWARE_VERSION string inside build_options.h
+          YEAR="$(date -u +%Y)"
+          echo "Injecting version: $VERSION (Year: $YEAR)"
+          # Find and replace the FIRMWARE_VERSION and COPYRIGHT_YEAR strings inside build_options.h
           sed -i "s/#define FIRMWARE_VERSION .*/#define FIRMWARE_VERSION \"$VERSION\"/g" include/build_options.h
+          sed -i "s/#define COPYRIGHT_YEAR .*/#define COPYRIGHT_YEAR \"$YEAR\"/g" include/build_options.h
 
       - name: Build all firmware profiles
         run: pio run
