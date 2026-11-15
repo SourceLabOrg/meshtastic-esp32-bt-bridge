@@ -287,8 +287,18 @@ static void bridgeBleTask(void* parameter) {
             }
         } else {
             BridgePacket packet;
-            // If we have a pending read, do not sleep at all (0 ticks).
-            // Otherwise, wait up to 10ms for incoming TCP packets to keep the loop fast.
+            // If we have a pending read from the radio, do not sleep at all (0 ticks).
+            // Otherwise, wait up to 10ms for incoming high-priority TCP packets.
+            //
+            // IMPORTANT BLE PACING NOTE:
+            // When tcp_to_ble_queue is empty, this 10ms wait (+ 1ms vTaskDelay at the bottom of the loop)
+            // intentionally paces mqtt_to_ble_queue drains to ~1 packet every 11ms (~90 pkt/s).
+            // Because Meshtastic's ToRadio characteristic uses Write Without Response (writeValue(..., false)),
+            // NimBLE's ble_gattc_write_no_rsp_flat() is non-blocking and buffers outbound writes inside
+            // NimBLE's internal msys_1 / ACL buffer pools (CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT = 12 blocks of 255B).
+            // Removing this 10ms wait would blast queued MQTT bursts into NimBLE at 1ms intervals (1000 pkt/s),
+            // instantly exhausting NimBLE's 12 msys_1 buffers (BLE_HS_ENOMEM) and overrunning the radio's
+            // internal ToRadio protobuf buffer.
             TickType_t waitTicks = pendingRadioRead ? 0 : pdMS_TO_TICKS(10);
             bool hasPacket = false;
 
@@ -296,7 +306,7 @@ static void bridgeBleTask(void* parameter) {
             if (xQueueReceive(tcp_to_ble_queue, &packet, waitTicks) == pdTRUE) {
                 hasPacket = true;
             }
-            // Normal Priority: Background MQTT downlink packets are checked
+            // Normal Priority: Background MQTT downlink packets are checked after the 10ms TCP window
             else if (xQueueReceive(mqtt_to_ble_queue, &packet, 0) == pdTRUE) {
                 hasPacket = true;
             }
@@ -462,7 +472,16 @@ bool bridge_enqueue_mqtt_to_ble(const uint8_t* data, size_t len) {
     BridgePacket packet;
     packet.len = len;
     memcpy(packet.data, data, len);
-    if (xQueueSend(mqtt_to_ble_queue, &packet, 0) != pdTRUE) {
+
+    // Apply conditional backpressure:
+    // - When BLE is actively connected, wait up to 50ms for a slot to open up. Since bridgeBleTask
+    //   drains 1 packet every ~11ms over BLE, waiting up to 50ms allows the underlying LwIP TCP
+    //   receive window / MQTT socket buffer to naturally pace high-speed WiFi bursts (>16 packets)
+    //   to match BLE transmission speed without consuming extra internal SRAM.
+    // - When BLE is disconnected (60s grace period), use 0 ticks (non-blocking) so once the
+    //   16-packet buffer fills up, excess packets drop immediately without stalling the MQTT task.
+    TickType_t waitTicks = s_ble_connected.load(std::memory_order_relaxed) ? pdMS_TO_TICKS(50) : 0;
+    if (xQueueSend(mqtt_to_ble_queue, &packet, waitTicks) != pdTRUE) {
         log_e("[Bridge-MQTT] ERROR: mqtt_to_ble_queue full (%d packets), dropped downlink packet", MQTT_QUEUE_SIZE);
         s_mqtt_to_ble_dropped.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -492,7 +511,7 @@ void bridge_init(const String& ble_mac, uint32_t ble_pin) {
     /**
      * Queues for passing packets between BLE <--> TCP.
      * Statically allocate FreeRTOS queues in .bss segment (zero heap fragmentation)
-     * Holds up to BRIDGE_QUEUE_SIZE (defaults 100) "packets" of data
+     * Holds up to BRIDGE_QUEUE_SIZE (defaults 32) "packets" of data
      */
     tcp_to_ble_queue = xQueueCreateStatic(
         BRIDGE_QUEUE_SIZE,
