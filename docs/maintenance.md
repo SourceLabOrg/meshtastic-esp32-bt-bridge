@@ -20,7 +20,7 @@ pio pkg outdated
 *(Note: Even when packages are pinned to an exact version in `platformio.ini`, `pio pkg outdated` compares the installed `Current`/`Wanted` version against the `Latest` version available in the PlatformIO Registry).*
 
 Inspect each of the following in `platformio.ini`:
-- [ ] **`platform = espressif32`** (Arduino Core / ESP-IDF toolchain)
+- [ ] **`platform = espressif32`** (Pinned to an exact version; Arduino Core / ESP-IDF toolchain)
   - Check release notes for ESP-IDF / Arduino Core changes affecting WiFi, LwIP, mbedTLS, or FreeRTOS.
 - [ ] **`h2zero/NimBLE-Arduino`** (Pinned to an exact version)
   - When upgrading, audit internal buffer sizing (`CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT`), `NimBLEAttValue` allocation sizing (`CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`), and FreeRTOS task notification usage against the invariants documented in `docs/nimble-2x-upgrade.md`.
