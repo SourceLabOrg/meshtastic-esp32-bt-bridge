@@ -137,20 +137,20 @@ In `GET /status`, `st.ble` includes `"state"` alongside `"connected"`:
 - [x] **Memory & Concurrency Verification:**
   - [x] Verify `diag_telemetry_get_snapshot()` and `GET /status` remain 100% lock-free / wait-free with zero heap allocations.
   - [x] Verify static `.bss` / `.data` RAM and Flash usage remain within expected bounds across all 3 boards (`+8 B` net `.bss` delta from replacing heap `Arduino::String targetBleMac` with static `char s_target_ble_mac[24]` + atomics).
-- [ ] **Functional & UX Scenario Verification (Hardware Test):**
-  - [ ] **Scenario 1 (AP / Setup Mode or Unconfigured BLE):** `Deactivate` button is hidden; `Edit` button is enabled immediately; scanning and testing work as before.
-  - [ ] **Scenario 2 (Normal Mode — Connected to Radio):**
-    - [ ] `Deactivate` button is shown; `Edit` button is disabled with hover tooltip `"You must deactivate the Bluetooth connection before editing."`
-    - [ ] Clicking `Deactivate` opens the confirmation modal; cancelling modal does nothing; confirming modal disconnects from the radio immediately and changes status pill to `Deactivated`, button to `Activate`, and enables `Edit`.
-    - [ ] Clicking `Edit` scans and discovers the previously connected Meshtastic radio in the dropdown.
-  - [ ] **Scenario 3 (Normal Mode — Disconnected & Cycling Retries):**
-    - [ ] Status pill alternates between `Connecting...` (8s) and `Disconnected` (5s).
-    - [ ] Clicking `Deactivate` during either `Connecting...` or `Disconnected` transitions to `Deactivating...` and then `Deactivated` once the loop iteration completes.
-    - [ ] Subsequent BLE scan completes full 4 seconds without `BLE_HS_EBUSY` or premature cancellation.
-  - [ ] **Scenario 4 (Edit Cancel vs. Save):**
-    - [ ] Clicking `Cancel` in Edit view returns to card view and stays `Deactivated` (`Activate` and `Edit` buttons available).
-    - [ ] Clicking `Activate` resumes connection attempts immediately.
-    - [ ] Clicking `Save Bluetooth` in Edit view saves to NVS, updates target MAC/PIN in `bridge.cpp`, and automatically activates BLE connection.
+- [x] **Functional & UX Scenario Verification (Hardware Test):**
+  - [x] **Scenario 1 (AP / Setup Mode or Unconfigured BLE):** `Deactivate` button is hidden; `Edit` button is enabled immediately; scanning and testing work as before.
+  - [x] **Scenario 2 (Normal Mode — Connected to Radio):**
+    - [x] `Deactivate` button is shown; `Edit` button is disabled with hover tooltip `"You must deactivate the Bluetooth connection before editing."`
+    - [x] Clicking `Deactivate` opens the confirmation modal; cancelling modal does nothing; confirming modal disconnects from the radio immediately and changes status pill to `Deactivated`, button to `Activate`, and enables `Edit`.
+    - [x] Clicking `Edit` scans and discovers the previously connected Meshtastic radio in the dropdown.
+  - [x] **Scenario 3 (Normal Mode — Disconnected & Cycling Retries):**
+    - [x] Status pill alternates between `Connecting...` (8s) and `Disconnected` (5s).
+    - [x] Clicking `Deactivate` during either `Connecting...` or `Disconnected` transitions to `Deactivating...` and then `Deactivated` once the loop iteration completes.
+    - [x] Subsequent BLE scan completes full 4 seconds without `BLE_HS_EBUSY` or premature cancellation.
+  - [x] **Scenario 4 (Edit Cancel vs. Save):**
+    - [x] Clicking `Cancel` in Edit view returns to card view and stays `Deactivated` (`Activate` and `Edit` buttons available).
+    - [x] Clicking `Activate` resumes connection attempts immediately.
+    - [x] Clicking `Save Bluetooth` in Edit view saves to NVS, updates target MAC/PIN in `bridge.cpp`, and automatically activates BLE connection.
 
 ---
 
