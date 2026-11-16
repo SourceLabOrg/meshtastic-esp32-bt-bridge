@@ -170,7 +170,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div id="ble-header-actions" style="display:flex; gap:6px; align-items:center;">
         <button class="btn-edit btn-warning" id="btn-toggle-ble" style="display:none;" onclick="toggleBleActive()">Deactivate</button>
         <span id="btn-edit-ble-wrap" style="display:inline-block;">
-          <button class="btn-edit" id="btn-edit-ble" onclick="toggleEditBle(true)">Edit</button>
+          <button class="btn-edit" id="btn-edit-ble" disabled onclick="toggleEditBle(true)">Edit</button>
         </span>
       </div>
     </div>
@@ -502,6 +502,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         .catch(() => {
           document.getElementById('view-wifi-ssid').innerText = 'Error loading';
           document.getElementById('view-ble-device').innerText = 'Error loading';
+          updateStatus();
         });
     }
 
@@ -917,6 +918,8 @@ const char index_html[] PROGMEM = R"rawliteral(
               body: 'active=false'
             })
             .then(() => {
+              lastBleState = 'Deactivating...';
+              syncBleHeaderControls();
               setTimeout(updateStatus, 300);
             })
             .catch(() => {
@@ -1295,7 +1298,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     window.onload = function() {
       document.getElementById('modal-btn-confirm').onclick = confirmModalAction;
       loadConfig();
-      updateStatus();
     };
   </script>
 </body>
