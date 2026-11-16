@@ -1366,7 +1366,10 @@ void config_ui_start_server() {
     server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request){
         log_d("[WebUI] GET /config requested (Client: %s)", request->client()->remoteIP().toString().c_str());
         BridgeConfig cfg = config_ui_load();
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        // Pre-size cbuf to fit base JSON (~256B) + escaped custom CA (newlines expand 1B -> 2B)
+        // so ESPAsyncWebServer 3.12+ never triggers per-character cbuf::resizeAdd() reallocations.
+        size_t streamBufSize = 384 + cfg.mqtt_custom_ca.length() + (cfg.mqtt_custom_ca.length() / 8);
+        AsyncResponseStream *response = request->beginResponseStream("application/json", streamBufSize);
 
         response->print("{\"wifi_ssid\":\"");
         utils_escape_json_print(*response, cfg.wifi_ssid);
@@ -1422,7 +1425,9 @@ void config_ui_start_server() {
         log_d("[WebUI] GET /metrics requested (Client: %s)", request->client()->remoteIP().toString().c_str());
 
         SystemTelemetrySnapshot snapshot = diag_telemetry_get_snapshot();
-        AsyncResponseStream *response = request->beginResponseStream("text/plain; version=0.0.4; charset=utf-8");
+        // Prometheus output is ~2.4 KB; pre-allocate 2800B cbuf so ESPAsyncWebServer 3.12+
+        // writes all metric lines in a single allocation with zero cbuf::resizeAdd() churn.
+        AsyncResponseStream *response = request->beginResponseStream("text/plain; version=0.0.4; charset=utf-8", 2800);
         diag_telemetry_format_prometheus(snapshot, *response);
         request->send(response);
     });

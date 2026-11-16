@@ -30,7 +30,7 @@ Every architectural choice for the metrics endpoint must adhere to three non-neg
 3. **Zero Heap Fragmentation & Minimal Memory Overhead:**
    * Microcontrollers are susceptible to heap fragmentation from repeated String allocations.
    * We avoid building a monolithic 2KB+ `String` on the heap with repeated reallocations (`+=`).
-   * Use `ESPAsyncWebServer`'s chunked `AsyncResponseStream` (`request->beginResponseStream("text/plain; version=0.0.4; charset=utf-8")`) to stream metric lines directly into lwIP network buffers, or format lines using a fixed stack-allocated scratch buffer. This results in deterministic, near-zero heap footprint and zero heap fragmentation even during aggressive scrape intervals (e.g., 5s).
+   * Use `ESPAsyncWebServer`'s `AsyncResponseStream` (`request->beginResponseStream("text/plain; version=0.0.4; charset=utf-8", 2800)`) pre-sized to fit the full payload so the underlying `cbuf` allocates once without `resizeAdd()` reallocations and streams metric lines directly into lwIP network buffers. This results in a deterministic, single-allocation heap footprint and zero heap fragmentation even during aggressive scrape intervals (e.g., 5s).
 
 ---
 

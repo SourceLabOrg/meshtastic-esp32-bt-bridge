@@ -24,8 +24,8 @@ Inspect each of the following in `platformio.ini`:
   - Check release notes for ESP-IDF / Arduino Core changes affecting WiFi, LwIP, mbedTLS, or FreeRTOS.
 - [ ] **`h2zero/NimBLE-Arduino`** (Pinned to an exact version)
   - When upgrading, audit internal buffer sizing (`CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT`), `NimBLEAttValue` allocation sizing (`CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`), and FreeRTOS task notification usage against the invariants documented in `docs/nimble-2x-upgrade.md`.
-- [ ] **`mathieucarbou/ESPAsyncWebServer`** (and its transitive `AsyncTCP` dependency)
-  - Verify captive portal endpoints, `AsyncResponseStream` (`GET /metrics` and `GET /status`), and WebUI asset serving.
+- [ ] **`ESP32Async/AsyncTCP`** and **`ESP32Async/ESPAsyncWebServer`** (Pinned to exact versions)
+  - Verify TCP bridge connections (port `4403`), captive portal endpoints, `AsyncResponseStream` buffer pre-sizing (`GET /metrics`, `GET /config`, `GET /status`), and WebUI asset serving.
 - [ ] **`nanopb/Nanopb`** (Pinned to an exact version)
   - Verify compatibility with `generate_protos.py` and the Meshtastic `.proto` definitions (`generate_protos.py` hashes `nanopb_generator.py` so changing the Nanopb version automatically triggers regeneration of all `.pb.h`/`.pb.cpp` files).
 
