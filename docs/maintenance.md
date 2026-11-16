@@ -8,36 +8,39 @@ This document outlines the standard maintenance workflow and verification checkl
 
 Review all project dependencies for newer versions.
 
-> **Rule of Thumb:** Upgrade **one dependency at a time** in its own dedicated branch and Pull Request (`git checkout -b chore/upgrade-<dep-name>`). This isolates breaking API changes, memory footprint shifts, and runtime regressions so they can be properly migrated, tested, and reviewed before merging.
+> **Rule of Thumb:**
+> 1. **Pin Exact Versions:** Pin dependencies in `platformio.ini` to exact versions (e.g., `2.5.2`, `0.4.93`) rather than floating `^` ranges. This guarantees deterministic local and CI builds and ensures changes to `platformio.ini` automatically invalidate the GitHub Actions `.pio` build cache (`hashFiles('**/platformio.ini', ...)`).
+> 2. **One Upgrade Per PR:** Upgrade **one dependency at a time** in its own dedicated branch and Pull Request (`git checkout -b chore/upgrade-<dep-name>`). This isolates breaking API changes, memory footprint shifts, and runtime regressions so they can be properly migrated, tested, and reviewed before merging.
 
 ### 1.1 PlatformIO Platform & Libraries (`platformio.ini`)
 Check for outdated PlatformIO packages by running:
 ```bash
 pio pkg outdated
 ```
+*(Note: Even when packages are pinned to an exact version in `platformio.ini`, `pio pkg outdated` compares the installed `Current`/`Wanted` version against the `Latest` version available in the PlatformIO Registry).*
 
 Inspect each of the following in `platformio.ini`:
 - [ ] **`platform = espressif32`** (Arduino Core / ESP-IDF toolchain)
   - Check release notes for ESP-IDF / Arduino Core changes affecting WiFi, LwIP, mbedTLS, or FreeRTOS.
 - [ ] **`h2zero/NimBLE-Arduino`** (Pinned to an exact version)
-  - Because NimBLE is pinned without `^`, check upstream releases manually.
   - When upgrading, audit internal buffer sizing (`CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT`), `NimBLEAttValue` allocation sizing (`CONFIG_NIMBLE_CPP_ATT_VALUE_INIT_LENGTH=512`), and FreeRTOS task notification usage against the invariants documented in `docs/nimble-2x-upgrade.md`.
 - [ ] **`mathieucarbou/ESPAsyncWebServer`** (and its transitive `AsyncTCP` dependency)
   - Verify captive portal endpoints, `AsyncResponseStream` (`GET /metrics` and `GET /status`), and WebUI asset serving.
-- [ ] **`nanopb/Nanopb`**
-  - Verify compatibility with `generate_protos.py` and the Meshtastic `.proto` definitions.
+- [ ] **`nanopb/Nanopb`** (Pinned to an exact version)
+  - Verify compatibility with `generate_protos.py` and the Meshtastic `.proto` definitions (`generate_protos.py` hashes `nanopb_generator.py` so changing the Nanopb version automatically triggers regeneration of all `.pb.h`/`.pb.cpp` files).
 
 ### 1.2 Meshtastic Protobufs Submodule (`proto/meshtastic`)
 The project uses the official [meshtastic/protobufs](https://github.com/meshtastic/protobufs) repository as a Git submodule to decode and encode radio packets (`ToRadio`, `FromRadio`, `ModuleConfig.mqtt`, `MqttClientProxyMessage`).
 
-1. Fetch the latest upstream changes in a dedicated branch:
+1. Fetch upstream tags and check out the latest official release tag in a dedicated branch (preferring tagged releases over untagged `master` commits):
    ```bash
    git -C proto/meshtastic fetch --tags origin
-   git submodule update --remote proto/meshtastic
+   git -C proto/meshtastic status -sb
+   git -C proto/meshtastic tag --sort=-v:refname | head -n 5
+   git -C proto/meshtastic checkout <latest-tag>
    ```
-2. Force a clean rebuild so `generate_protos.py` regenerates all Nanopb `.pb.c` / `.pb.h` files:
+2. Run a build (`generate_protos.py` automatically detects modified `.proto` / `.options` files via MD5 hash and regenerates the affected Nanopb `.pb.cpp` / `.pb.h` files):
    ```bash
-   pio run -t clean
    pio run
    ```
 3. Verify that:

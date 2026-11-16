@@ -55,13 +55,15 @@ elif not proto_files:
     print(f"[generate_protos] WARNING: No proto files found in {proto_src_dir}. Did you run git submodule update --init?")
 else:
     rebuild_any = False
+    generator_bytes = pathlib.Path(nanopb_generator).read_bytes()
     for proto_path in proto_files:
         basename = os.path.basename(proto_path)
         stem = os.path.splitext(basename)[0]
         options_path = os.path.join(proto_src_dir, stem + ".options")
 
-        # Compute hash of proto + options
+        # Compute hash of nanopb_generator + proto + options
         hasher = hashlib.md5()
+        hasher.update(generator_bytes)
         hasher.update(pathlib.Path(proto_path).read_bytes())
         if os.path.exists(options_path):
             hasher.update(pathlib.Path(options_path).read_bytes())
