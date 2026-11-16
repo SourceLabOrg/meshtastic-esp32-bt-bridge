@@ -60,6 +60,7 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
   },
   "ble": {
     "connected": true,
+    "state": "Connected",
     "rx_count": 42,
     "tx_count": 38,
     "invalid_count": 0
@@ -142,7 +143,7 @@ To minimize network and CPU impact on the ESP32 (Core 0), the separate `/mqtt_st
 * **Traffic**: Live TCP traffic throughput counters (Sent / Received / Invalid).
 
 ### 2. Bluetooth Meshtastic Device Card
-* **Connection Status**: Displays a live status pill (`Connected` / `Disconnected` / `Connecting`).
+* **Connection Status**: Displays a live status pill (`Connected` / `Connecting...` / `Disconnected` / `Deactivating...` / `Deactivated` / `Disabled`).
 * **Traffic**: Live BLE traffic throughput counters (Sent / Received / Invalid).
 
 ### 3. MQTT Gateway Card

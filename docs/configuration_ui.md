@@ -15,10 +15,11 @@ The UI is built with a clean, modular card-based interface that allows inspectin
   * Features a **🔍 Scan for Networks** button (with scan in progress indicator and scan/save buttons disabled during scans).
   * Independent **Save WiFi** button persists network credentials without affecting BLE settings.
 * **Bluetooth Target Card:**
-  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed), masked PIN, live Bluetooth connection status pill (`Connected` / `Disconnected`), and live Bluetooth **Traffic** counters (sent, received, invalid).
+  * Displays the configured target device: `Target Device: <Name> (<MAC>)` (or `(<MAC>)` if unnamed), masked PIN, live Bluetooth connection status pill (`Connected` / `Connecting...` / `Disconnected` / `Deactivating...` / `Deactivated` / `Disabled`), and live Bluetooth **Traffic** counters (sent, received, invalid).
+  * In Normal Operating Mode when a target radio is configured, provides a **`Deactivate` / `Activate`** button in the card header next to **`Edit`**. While the BLE connection loop is active (`Connected`, `Connecting...`, or `Disconnected`), the **`Edit`** button is disabled with a hover tooltip (`"You must deactivate the Bluetooth connection before editing."`) to prevent NimBLE GAP scan/connect contention and allow the connected Meshtastic radio to resume advertising. Clicking **`Deactivate`** (or clicking the disabled **`Edit`** button) presents a custom confirmation modal before disconnecting and pausing automatic reconnection; clicking **`Activate`** (or saving new Bluetooth settings) immediately resumes connecting.
   * In Edit mode, offers a live scan dropdown with RSSI signal strengths, manual MAC entry, and 6-digit PIN input.
   * Features a **⚡ Test Connection** button to verify BLE pairing and Meshtastic GATT services live.
-  * Independent **Save Bluetooth** button persists target device name, MAC, and PIN.
+  * Independent **Save Bluetooth** button persists target device name, MAC, and PIN (and in Normal Operating Mode, updates the active target and automatically re-activates the BLE connection loop without requiring a reboot).
 * **MQTT Gateway Card:**
   * Displays feature enable/disable toggle, live radio sync status, active broker address/port/TLS mode, Client Status pill, and live MQTT **Traffic** counters (sent, received, invalid).
   * In Edit mode, offers:
@@ -62,7 +63,7 @@ The UI is built with a clean, modular card-based interface that allows inspectin
 2. **Web Server Endpoints (`config_ui.cpp`)**:
    * **`GET /`**: Serves the single-page HTML/CSS/JS application directly from flash (`PROGMEM`) via `AsyncProgmemResponse` with zero heap allocation.
    * **`GET /config`**: Returns current settings as JSON: `{"wifi_ssid":"...","wifi_has_pass":true,"ble_name":"...","ble_mac":"...","ble_pin":"...","debug_logs":false,"mqtt_enabled":false,"mqtt_tls_insecure":false,"mqtt_custom_ca":"..."}`.
-   * **`GET /status`**: Returns unified live diagnostic and telemetry JSON polled every 7 seconds by the client: contains `uptime_seconds`, `heap` (free, min_free, max_alloc), `wifi` (connected, is_ap_mode, ip, rssi, mdns_host), `ble` (connected, rx_count, tx_count, invalid_count), `tcp` (connected_clients, max_clients, rx_count, tx_count, invalid_count), `traffic` (ble, tcp, mqtt rx/tx/invalid), `queues` (waiting, capacity, dropped for `tcp_to_ble`, `ble_to_tcp`, `mqtt_to_ble`), `stacks` (ble_task, net_task free bytes), and `mqtt` (gateway_enabled, state, radio_proxy_enabled, broker, root, published, received, dropped, invalid).
+   * **`GET /status`**: Returns unified live diagnostic and telemetry JSON polled every 7 seconds by the client: contains `uptime_seconds`, `heap` (free, min_free, max_alloc), `wifi` (connected, is_ap_mode, ip, rssi, mdns_host), `ble` (connected, state, rx_count, tx_count, invalid_count), `tcp` (connected_clients, max_clients, rx_count, tx_count, invalid_count), `traffic` (ble, tcp, mqtt rx/tx/invalid), `queues` (waiting, capacity, dropped for `tcp_to_ble`, `ble_to_tcp`, `mqtt_to_ble`), `stacks` (ble_task, net_task free bytes), and `mqtt` (gateway_enabled, state, radio_proxy_enabled, broker, root, published, received, dropped, invalid).
    * **`GET /metrics`**: Standards-compliant Prometheus / OpenMetrics scraping endpoint (`text/plain; version=0.0.4; charset=utf-8`). Streams line-by-line metrics (`meshbridge_*`) directly into lwIP network output buffers via `AsyncResponseStream` with zero large heap allocations. Suitable for scraping by Prometheus, VictoriaMetrics, Grafana Agent, and Home Assistant.
    * **`GET /start_scan_wifi`**: Initiates an asynchronous WiFi network scan.
    * **`GET /scan_wifi_results`**: Polls WiFi scan progress and returns JSON array of discovered networks: `[{"ssid":"MyWiFi","rssi":-58,"is_open":false}]`.
@@ -70,8 +71,9 @@ The UI is built with a clean, modular card-based interface that allows inspectin
    * **`GET /scan_results`**: Polls scan progress and returns JSON array of discovered devices: `[{"name":"Meshtastic_xxxx","mac":"AA:BB:CC:DD:EE:FF","rssi":-68}]`.
    * **`POST /start_test_ble`**: Launches a background FreeRTOS task to test BLE pairing and GATT service discovery for the given MAC and PIN.
    * **`GET /test_ble_status`**: Polls the test task state and returns result JSON (`{"status":"done","success":true,"message":"..."}`).
+   * **`POST /set_ble_active`**: Activates (`active=1`) or deactivates (`active=0`) the runtime BLE connection loop in Normal Operating Mode so the user can scan for or test BLE devices without GAP contention.
    * **`POST /save_wifi`**: Saves `wifi_ssid` and `wifi_pass` to NVS.
-   * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS.
+   * **`POST /save_ble`**: Saves `ble_name`, `ble_mac`, and `ble_pin` to NVS, and in Normal Operating Mode updates the runtime BLE target and automatically activates the BLE connection loop.
    * **`POST /save_mqtt`**: Saves `mqtt_enabled`, `mqtt_tls_insec`, and `mqtt_custom_ca` to NVS and applies changes live if in Normal mode.
    * **`POST /save_system`**: Saves `debug_logs` boolean flag to NVS.
    * **`POST /reboot`**: Restarts the ESP32 into normal bridge mode.

@@ -313,7 +313,7 @@ BleTestResult ble_client_test_connection(const String& macStr, const String& pin
     log_i("[BLE Test] Attempting test connection to %s with PIN %06u...", macStr.c_str(), activePasskey);
 
     // Determine the type of MAC address the BLE device is using.
-    NimBLEAddress addr = utils_parse_ble_address(macStr);
+    NimBLEAddress addr = utils_parse_ble_address(macStr.c_str());
 
     // Always delete existing bonding data so the PIN is genuinely challenged every test
     NimBLEDevice::deleteBond(addr);

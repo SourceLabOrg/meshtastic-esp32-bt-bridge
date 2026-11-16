@@ -108,7 +108,7 @@ void setup() {
             config_ui_start_server();
 
             // Init and start bridge BLE <--> WIFI
-            bridge_init(cfg.ble_mac, cfg.ble_pin.toInt());
+            bridge_init(cfg.ble_mac.c_str(), cfg.ble_pin.toInt());
             bridge_start();
 
             // Start periodic diagnostic telemetry task (Core 0, Priority 1, every 15s)
