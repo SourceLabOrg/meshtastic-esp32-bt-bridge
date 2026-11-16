@@ -45,7 +45,10 @@ The project uses the official [meshtastic/protobufs](https://github.com/meshtast
    ```
 3. Verify that:
    - All `.proto` and `.options` files compile cleanly under Nanopb.
-   - No changes to `ToRadio`, `FromRadio`, `ModuleConfig.MQTTConfig`, or `MqttClientProxyMessage` break field tags, callbacks, or exceed `MESHTASTIC_MAX_PACKET_SIZE` (`576` bytes).
+   - No changes to `ToRadio`, `FromRadio`, `ModuleConfig.MQTTConfig`, or `MqttClientProxyMessage` break field tags, callbacks, or exceed `MESHTASTIC_MAX_PACKET_SIZE` (`576` bytes). You can verify the Nanopb-computed maximum wire sizes directly in the generated header:
+     ```bash
+     grep -E "meshtastic_(FromRadio|ToRadio|MqttClientProxyMessage)_size" .pio/build/seeed_xiao_esp32s3/nanopb/meshtastic/mesh.pb.h
+     ```
 
 ### 1.3 Web Flasher, CI/CD & DevContainer Dependencies
 - [ ] **ESP Web Tools (`web/index.html`):** Check if a newer major/minor version of `esp-web-tools` is available on unpkg (`https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module`).
