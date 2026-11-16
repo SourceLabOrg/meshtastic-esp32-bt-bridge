@@ -54,6 +54,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   button { width: 100%; padding: 10px; margin: 6px 0; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background-color 0.2s, opacity 0.2s; }
   button:hover { opacity: 0.92; }
   button:disabled { opacity: 0.55 !important; cursor: not-allowed; }
+  #btn-edit-ble:disabled { pointer-events: none; }
   .btn-primary { background-color: #0066cc; color: white; }
   .btn-success { background-color: #28a745; color: white; }
   .btn-secondary { background-color: #e4e6eb; color: #1c1e21; }
@@ -169,7 +170,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="card-title">Bluetooth Meshtastic Device</div>
       <div id="ble-header-actions" style="display:flex; gap:6px; align-items:center;">
         <button class="btn-edit btn-warning" id="btn-toggle-ble" style="display:none;" onclick="toggleBleActive()">Deactivate</button>
-        <span id="btn-edit-ble-wrap" style="display:inline-block;">
+        <span id="btn-edit-ble-wrap" style="display:inline-block;" onclick="onEditBleWrapClick()">
           <button class="btn-edit" id="btn-edit-ble" disabled onclick="toggleEditBle(true)">Edit</button>
         </span>
       </div>
@@ -640,7 +641,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                 blePill.className = 'status-pill waiting';
               } else if (bleState === 'Deactivated') {
                 blePill.innerText = 'Deactivated';
-                blePill.className = 'status-pill disabled';
+                blePill.className = 'status-pill error';
               } else {
                 blePill.innerText = 'Disconnected';
                 blePill.className = 'status-pill error';
@@ -857,8 +858,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       if (isApModeState || !currentConfig || !currentConfig.ble_mac) {
         btnToggle.style.display = 'none';
         btnEdit.disabled = false;
-        btnEdit.title = '';
         editWrap.title = '';
+        editWrap.style.cursor = 'pointer';
         return;
       }
 
@@ -868,25 +869,55 @@ const char index_html[] PROGMEM = R"rawliteral(
         btnToggle.className = 'btn-edit btn-success';
         btnToggle.disabled = false;
         btnEdit.disabled = false;
-        btnEdit.title = '';
         editWrap.title = '';
+        editWrap.style.cursor = 'pointer';
       } else if (lastBleState === 'Deactivating...') {
         btnToggle.innerText = 'Deactivating...';
         btnToggle.className = 'btn-edit btn-warning';
         btnToggle.disabled = true;
         btnEdit.disabled = true;
         const tip = 'Waiting for Bluetooth connection attempt to finish deactivating...';
-        btnEdit.title = tip;
         editWrap.title = tip;
+        editWrap.style.cursor = 'not-allowed';
       } else {
         btnToggle.innerText = 'Deactivate';
         btnToggle.className = 'btn-edit btn-warning';
         btnToggle.disabled = false;
         btnEdit.disabled = true;
         const tip = 'You must deactivate the Bluetooth connection before editing.';
-        btnEdit.title = tip;
         editWrap.title = tip;
+        editWrap.style.cursor = 'not-allowed';
       }
+    }
+
+    function performBleDeactivate() {
+      const btnToggle = document.getElementById('btn-toggle-ble');
+      if (btnToggle) btnToggle.disabled = true;
+      fetch('/set_ble_active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'active=false'
+      })
+      .then(() => {
+        lastBleState = 'Deactivating...';
+        syncBleHeaderControls();
+        setTimeout(updateStatus, 300);
+      })
+      .catch(() => {
+        if (btnToggle) btnToggle.disabled = false;
+      });
+    }
+
+    function onEditBleWrapClick() {
+      const btnEdit = document.getElementById('btn-edit-ble');
+      if (!btnEdit || !btnEdit.disabled || lastBleState === 'Deactivating...') return;
+      showModal(
+        'Deactivate Bluetooth First',
+        'You must deactivate the Bluetooth connection before editing.\n\nDeactivating Bluetooth will disconnect the bridge from your Meshtastic radio and stop automatic reconnection until you activate it again, save Bluetooth settings, or reboot the bridge.',
+        'Deactivate',
+        'btn-warning',
+        performBleDeactivate
+      );
     }
 
     function toggleBleActive() {
@@ -910,22 +941,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           'Deactivating Bluetooth will disconnect the bridge from your Meshtastic radio and stop automatic reconnection until you activate it again, save Bluetooth settings, or reboot the bridge.',
           'Deactivate',
           'btn-warning',
-          function() {
-            if (btnToggle) btnToggle.disabled = true;
-            fetch('/set_ble_active', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: 'active=false'
-            })
-            .then(() => {
-              lastBleState = 'Deactivating...';
-              syncBleHeaderControls();
-              setTimeout(updateStatus, 300);
-            })
-            .catch(() => {
-              if (btnToggle) btnToggle.disabled = false;
-            });
-          }
+          performBleDeactivate
         );
       }
     }

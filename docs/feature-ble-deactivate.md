@@ -24,7 +24,7 @@ This working document tracks the design, implementation plan, verification check
    * Works identically to existing behavior: `bridgeBleTask` is not running, the `Deactivate` / `Activate` button is hidden, and **Edit** is immediately enabled.
 2. **When a BLE Device is Configured in Normal Mode (Active State):**
    * The Bluetooth card header displays a **`Deactivate`** button next to **`Edit`**.
-   * The **`Edit`** button is **disabled** with hover tooltip: `title="You must deactivate the Bluetooth connection before editing."`
+   * The **`Edit`** button is **disabled** with hover tooltip: `title="You must deactivate the Bluetooth connection before editing."` (clicking the disabled **`Edit`** button also immediately opens the confirmation modal explaining that Bluetooth must be deactivated before editing, with a direct **`Deactivate`** button).
    * Clicking **`Deactivate`** displays an in-DOM confirmation modal (Captive Network Assistant compatible):
      * **Title:** `Deactivate Bluetooth Connection?`
      * **Message:** `Deactivating Bluetooth will disconnect the bridge from the Meshtastic radio and stop automatic reconnection until you activate it again, save new Bluetooth settings, or reboot the device.\n\nDo you want to proceed?`
@@ -35,7 +35,7 @@ This working document tracks the design, implementation plan, verification check
    * While in `"Deactivating..."`, the WebUI polls `/status` every `500ms` so the UI transitions to `"Deactivated"` immediately.
    * The previously connected Meshtastic radio immediately resumes BLE advertising.
    * In the WebUI:
-     * The Connection status pill displays **`Deactivated`** (`.status-pill.disabled`).
+     * The Connection status pill displays **`Deactivated`** (`.status-pill.error`, Red).
      * The header button changes to **`Activate`** (clicking it calls `POST /set_ble_active` with `active=1` and immediately resumes connecting).
      * The **`Edit`** button becomes **enabled** (tooltip removed).
 4. **Inside the Bluetooth Edit View:**
@@ -72,12 +72,12 @@ In `GET /status`, `st.ble` includes `"state"` alongside `"connected"`:
 ```
 
 #### Status Pill Mapping in WebUI:
-* `"Connected"` $\rightarrow$ `.status-pill.status-connected` (Green)
-* `"Connecting..."` $\rightarrow$ `.status-pill.status-warning` (Amber)
-* `"Disconnected"` $\rightarrow$ `.status-pill.status-warning` (Amber)
-* `"Deactivating..."` $\rightarrow$ `.status-pill.status-disabled` (Gray)
-* `"Deactivated"` $\rightarrow$ `.status-pill.status-disabled` (Gray)
-* `"Not Configured"` $\rightarrow$ `.status-pill.status-disabled` (`Disabled`, Gray)
+* `"Connected"` $\rightarrow$ `.status-pill.connected` (Green)
+* `"Connecting..."` $\rightarrow$ `.status-pill.connecting` (Blue/Teal)
+* `"Disconnected"` $\rightarrow$ `.status-pill.error` (Red)
+* `"Deactivating..."` $\rightarrow$ `.status-pill.waiting` (Amber)
+* `"Deactivated"` $\rightarrow$ `.status-pill.error` (Red)
+* `"Not Configured"` $\rightarrow$ `.status-pill.disabled` (Gray)
 
 ### 2.3 Thread Safety & NimBLE Concurrency Details
 
@@ -172,7 +172,7 @@ In `GET /status`, `st.ble` includes `"state"` alongside `"connected"`:
 | 3 | Chunk 2 Review | Sleep slice interval in `waitReconnectDelayOrWake()`: `50ms` vs `250ms` vs `1000ms`. | Resolved | Selected `250ms` (`BLE_TASK_WAKE_POLL_MS = 250`) as the sweet spot: wakes 4 times/sec with negligible CPU overhead while keeping UI transitions imperceptibly fast. |
 | 4 | Initial Analysis | `POST /save_ble` previously only wrote to NVS (`Preferences`) without updating `s_target_ble_mac` / `s_target_ble_pin` in `bridge.cpp`, requiring a full reboot in Normal Mode. | Resolved | Added lock-free `bridge_update_ble_config(const char* ble_mac, uint32_t ble_pin)` using `std::memory_order_release` / `acquire` on `s_ble_config_dirty` so `/save_ble` updates runtime target and auto-activates immediately. |
 | 5 | Initial Analysis | `ble_client_test_connection()` overwrites `NimBLEDevice` security callbacks and deletes the test bond on completion. | Resolved | Re-assert `NimBLEDevice::setSecurityAuth`, `setSecurityIOCap`, and `bleClient->setClientCallbacks(&bridgeCallbacks, false)` before each connection attempt in `bridgeBleTask`. |
-| 6 | Chunk 5 Review | Disabled `<button>` elements do not fire hover `title` tooltips in Safari/Firefox, and `.btn-edit` CSS order overrode `.btn-warning` / `.btn-success` background colors. | Resolved | Wrapped `#btn-edit-ble` in `<span id="btn-edit-ble-wrap">` with matching `title`, and added `.btn-edit.btn-warning` and `.btn-edit.btn-success` CSS selectors. |
+| 6 | Chunk 5 Review / Hardware Test | Disabled `<button>` elements do not fire hover `title` tooltips in browsers (and capture mouse hit-testing unless `pointer-events: none` is set), native tooltips are slow/dismiss on click, and `.btn-edit` CSS order overrode `.btn-warning` / `.btn-success` background colors. | Resolved | Wrapped `#btn-edit-ble` in `<span id="btn-edit-ble-wrap" onclick="onEditBleWrapClick()">` with `title` and `cursor: not-allowed`, added `#btn-edit-ble:disabled { pointer-events: none; }` so both hover tooltips and clicks reach the `<span>` wrapper (opening a single `"Deactivate Bluetooth First"` modal with a direct `Deactivate` action), and added `.btn-edit.btn-warning` / `.btn-edit.btn-success` CSS selectors. |
 | 7 | Deep Code Review | **NimBLE Link Layer Teardown Race (`m_connStatus == DISCONNECTING` vs `DISCONNECTED`):** `bleClient->disconnect()` calls `ble_gap_terminate()` asynchronously, setting `m_connStatus = DISCONNECTING` (so `isConnected()` immediately returns `false`) while `m_connHandle != BLE_HS_CONN_HANDLE_NONE` until `BLE_GAP_EVENT_DISCONNECT` fires on Core 0. Transitioning to `BLE_STATE_DEACTIVATED` or calling `bleClient->connect()` before `getConnHandle() == BLE_HS_CONN_HANDLE_NONE` can start a scan before the radio finishes Link Layer teardown or hit `m_connStatus != DISCONNECTED` in `NimBLEClient::connect()`. | Closed (Won't Fix) | Negligible in practice: BLE Link Layer termination (`LL_TERMINATE_IND`) completes in ~15–60ms, whereas the WebUI `/status` poll (`500ms`) + human reaction time to click `Edit` takes ~1s+, and `s_ble_config_dirty` / retry paths already include `250ms`–`5000ms` delays. Kept original code for simplicity. |
 | 8 | Deep Code Review | **Stale Cached GATT Attribute Handles When Switching Radios Live (`deleteAttributes = false`):** `bleClient->connect(addr, false)` preserves `m_svcVec` across reconnects. When switching to a different Meshtastic radio at runtime via `POST /save_ble`, `getService()` / `getCharacteristic()` would return the cached GATT attribute handles from the previous radio instead of discovering the new radio's GATT table. | Resolved | When `s_ble_config_dirty` is processed on Core 1 in `bridgeBleTask`, clear `toRadioChar = fromRadioChar = fromNumChar = NULL`, disconnect if connected, and call `bleClient->deleteServices()` so the next `connect(addr, false)` discovers the new radio's GATT table while normal reconnects to the same radio reuse cached attributes without heap churn. |
 | 9 | Deep Code Review | **Mid-`connect()` Deactivation Running Post-Connect Setup & `onDisconnect` State Clobber:** If `bleClient->connect()` succeeds while `s_ble_deactivated` was set mid-attempt, `bridgeBleTask` still runs `secureConnection()`, GATT discovery, `BLE_STATE_CONNECTED`, and `mqtt_net_on_ble_connected()` before disconnecting on the next loop iteration. Also, `onDisconnect()` on Core 0 unconditionally wrote `BLE_STATE_DISCONNECTED` when `!s_ble_deactivated`, which could clobber `BLE_STATE_CONNECTING`. | Resolved | Added an immediate `if (s_ble_deactivated.load(std::memory_order_acquire)) continue;` check right after `bleClient->connect()` returns `true` so `bridgeBleTask` loops straight back to the deactivation handler without running `secureConnection()`, GATT discovery, or briefly flashing `Connected` in the WebUI. (`onDisconnect()` only fires on established connections, so `compare_exchange_strong` was unnecessary.) |
