@@ -91,9 +91,9 @@ build_flags =
 - `TCP_PORT`: The network port the bridge listens on for incoming Meshtastic App connections. (Default: `4403`).
 - `TCP_IDLE_TIMEOUT_SECONDS`: How long before idle TCP connections will be disconnected. (Default: `600`).
 - `MAX_TCP_CLIENTS`: The maximum number of simultaneous apps that can connect to the bridge. (Default: `3`).
-- `BLUETOOTH_TIMEOUT_SECONDS`: Bluetooth connection timeout in seconds. (Default: `10`).
+- `BLUETOOTH_TIMEOUT_SECONDS`: Bluetooth connection timeout in seconds. (Default: `8`).
 - `BLUETOOTH_RECONNECT_DELAY_MS`: Delay in milliseconds between BLE reconnection attempts. (Default: `5000`).
-- `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration in seconds. (Default: `5`).
+- `BLUETOOTH_SCAN_TIME_SECONDS`: Bluetooth discovery scan duration in seconds. (Default: `4`).
 - `BLUETOOTH_MAX_DEVICES_DISCOVERABLE`: Maximum number of BLE devices to return from a discovery scan. (Default: `60`).
 - `BLE_MTU_SIZE`: Preferred BLE ATT MTU size (in bytes) negotiated with the Meshtastic radio. (Default: `512`).
 - `BLE_WRITE_PACING_MS`: Minimum interval (in milliseconds) between consecutive BLE `ToRadio` writes. (Default: `12`).
@@ -101,6 +101,11 @@ build_flags =
 - `MESHTASTIC_MAX_PACKET_SIZE`: Maximum binary packet size for Meshtastic `ToRadio` envelopes. (Default: `576`).
 - `BRIDGE_QUEUE_SIZE`: Capacity of the bidirectional FreeRTOS queues between BLE and TCP tasks. (Default: `32`).
 - `MQTT_QUEUE_SIZE`: Capacity of the static MQTT downlink queue. (Default: `16`).
+- `MQTT_BLE_GRACE_PERIOD_SECONDS`: Duration in seconds to keep the MQTT broker connected during transient Bluetooth drops. (Default: `60`).
+- `MQTT_CLIENT_KEEPALIVE_SECONDS`: Underlying MQTT client keepalive interval in seconds. (Default: `60`).
+- `MQTT_RECONNECT_TIME_MS`: Delay in milliseconds before attempting to reconnect to the MQTT broker. (Default: `15000`).
+- `MQTT_CLIENT_BUFFER_SIZE`: Internal MQTT client network buffer size in bytes. (Default: `2048`).
+- `MQTT_MAX_CUSTOM_CA_LENGTH`: Maximum allowable length in bytes for a custom CA root certificate in PEM format. (Default: `3500`).
 
 ### Static FreeRTOS Queues & RAM Sizing Math
 All FreeRTOS queues (`tcp_to_ble_queue`, `ble_to_tcp_queue`, and `mqtt_to_ble_queue`) are statically allocated in the `.bss` segment using `xQueueCreateStatic` to prevent runtime dynamic heap fragmentation and eliminate Out-Of-Memory crashes.
@@ -159,7 +164,8 @@ To achieve a clean console while preserving our own debug logs, we use the follo
 To support secure MQTTS connections to any public broker (such as `mqtt.meshtastic.org:8883` using Let's Encrypt, or AWS IoT, HiveMQ, EMQX, etc.) without hardcoding static server certificates, the project embeds a compact, pre-compiled Mozilla Root CA bundle.
 
 ### How it Works
-1. **Pre-Compiled Bundle (`data/cert/x509_crt_bundle.bin`):** Contains ~130+ standard trusted root CA certificates compressed into a binary format (subject names + public keys only, ~86 KB total).
+1. **Pre-Compiled Bundle (`data/cert/x509_crt_bundle.bin`):** Contains 118 standard trusted root CA certificates compressed into a binary format (subject names + public keys only, ~53 KB total).
+   * **Current Embedded Mozilla CA Store Release Date:** `Thu Nov  5 04:12:01 2026 GMT` (SHA-256: `8ca330673e7ecd07610eecfaffd23aba8b9ceca10a381d3878f268348edf5aec`).
 2. **PlatformIO Embedding:** Configured in `platformio.ini` via:
    ```ini
    board_build.embed_files = data/cert/x509_crt_bundle.bin

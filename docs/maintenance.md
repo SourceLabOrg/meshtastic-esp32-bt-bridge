@@ -71,9 +71,15 @@ Before merging any dependency upgrade branch:
 
 ## 2. Refresh Embedded TLS Root CA Bundle
 
-To ensure MQTTS connections continue to trust current public certificate authorities (Let's Encrypt, AWS IoT, HiveMQ, EMQX, etc.), regenerate `data/cert/x509_crt_bundle.bin` from the latest official Mozilla / cURL CA store (`cacert.pem`).
+To ensure MQTTS connections continue to trust current public certificate authorities (Let's Encrypt, AWS IoT, HiveMQ, EMQX, etc.), check if a newer Mozilla / cURL CA store (`cacert.pem`) has been published since the release date recorded in [docs/development.md](development.md#8-tls-root-certificate-authority-ca-bundle-pipeline):
 
-Run the following commands from the root of the repository (typically on its own branch/PR, e.g., `chore/update-ca-bundle`):
+```bash
+curl -s https://curl.se/ca/cacert.pem | head -n 5
+```
+
+Compare the `## Certificate data from Mozilla as of: ...` line against the **Current Embedded Mozilla CA Store Release Date** in `docs/development.md`:
+- If the date matches, the embedded `data/cert/x509_crt_bundle.bin` is already up to date and you can skip the rest of this section.
+- If a newer CA bundle is available, regenerate `data/cert/x509_crt_bundle.bin` on its own branch/PR (e.g., `chore/update-ca-bundle`):
 
 ```bash
 # 1. Create a temporary Python virtual environment with cryptography
@@ -92,8 +98,8 @@ mv x509_crt_bundle data/cert/x509_crt_bundle.bin
 rm -rf /tmp/ca_env /tmp/gen_crt_bundle.py /tmp/cacert.pem
 ```
 
-- [ ] Check `git status` / `git diff` to see if `data/cert/x509_crt_bundle.bin` changed.
-- [ ] If updated, run `pio run` to verify the binary bundle embeds cleanly into all board targets and commit `data/cert/x509_crt_bundle.bin`.
+- [ ] Update the **Current Embedded Mozilla CA Store Release Date** (and SHA-256) in `docs/development.md`.
+- [ ] Run `pio run` to verify the binary bundle embeds cleanly into all board targets and commit `data/cert/x509_crt_bundle.bin` and `docs/development.md`.
 
 *(See [docs/development.md](development.md#8-tls-root-certificate-authority-ca-bundle-pipeline) for architectural details on how the CA bundle is embedded and verified at runtime).*
 

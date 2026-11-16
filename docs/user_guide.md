@@ -8,10 +8,13 @@ The bridge uses the ESP32's built-in LED to visually communicate its current sta
 *   **Setup Pattern** (Short, Short, Long, Long): **Setup Mode / Captive Portal.** The bridge is broadcasting its `Meshtastic-Bridge-Setup` WiFi network. Connect to it to configure the bridge.
 *   **Medium Blink** (500ms on / 500ms off): **Searching.** The bridge is in normal operating mode but is currently disconnected from the target Meshtastic Bluetooth radio. It is actively scanning to reconnect.
 *   **Solid ON:** **Connected.** The bridge has successfully secured a Bluetooth connection with the Meshtastic radio and is actively routing packets.
+*   **OFF:** **Bluetooth Deactivated.** Bluetooth has been manually deactivated via the Web UI (e.g. while scanning for or switching to a different radio).
 
 ## Entering Setup Mode
 
-If you need to change your WiFi credentials or the target Bluetooth device:
+If the bridge is already connected to your WiFi network, you can access the Web UI directly at `http://<bridge-name>.local` (and use the **Deactivate** button in the Bluetooth card to scan for and switch radios without rebooting).
+
+If you cannot reach the bridge over WiFi and need to force it into Setup Mode:
 
 1. Press the RST (Reset) button on the ESP32.
 2. The LED will begin flashing rapidly.
