@@ -427,6 +427,12 @@ static void bridgeBleTask(void* parameter) {
             // NimBLE 2.x setConnectTimeout takes milliseconds
             bleClient->setConnectTimeout(BLUETOOTH_TIMEOUT_SECONDS * 1000);
             if (bleClient->connect(addr, false)) {
+                // If the user clicked Deactivate during the connection attempt, jump back
+                // to the start of the loop so we process the disconnect immediately.
+                if (s_ble_deactivated.load(std::memory_order_acquire)) {
+                    continue;
+                }
+
                 log_i("[Bridge-BLE] Connected! Securing connection...");
                 // Note: In NimBLE 2.x, secureConnection() (async=false) blocks synchronously
                 // until the SMP encryption handshake either succeeds (returns true) or errors/disconnects (returns false).
