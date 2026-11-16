@@ -98,3 +98,12 @@ When working on this project:
 2. Ensure new dependencies are added to `platformio.ini`.
 3. Use NimBLE for all Bluetooth operations.
 4. Keep memory management in mind; Meshtastic packets can be large, so avoid excessive dynamic memory allocation (`String`, `malloc`) in the fast-path bridging loop.
+5. For all coding changes, follow these core engineering principles:                                                                                       
+  - Keep things easy to understand and readable.                                                                                                          
+  - Keep `malloc`s and dynamic allocations (`String`, heap buffers) to a minimum, and keep heap churn/fragmentation to a minimum (especially in the fast-path bridging loop and telemetry paths).                                                                                                               
+  - Use lock-free mechanisms (e.g., `std::atomic`, static `.bss` buffers, single-core task ownership) and avoid locking and contention between threads/cores/tasks.                                                                                                                                        
+
+6. Development & Review Workflow:                                                                                                                          
+  - Keep project documentation in `docs/` up to date as we go.                                                                                            
+  - Provide changes in the smallest logical chunks and show the diff for each chunk.                                                                      
+  - Explain what each diff is changing and why, prior to making the edits - wait for user review, clarification, or confirmation before applying the change and moving on to the next change. 

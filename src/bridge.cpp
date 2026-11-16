@@ -370,14 +370,19 @@ static void bridgeBleTask(void* parameter) {
             continue;
         }
 
-        // If target MAC/PIN was updated via WebUI while connected, disconnect to switch targets.
+        // If target MAC/PIN was updated via WebUI, clear cached GATT handles (and disconnect if active).
         if (s_ble_config_dirty.exchange(false, std::memory_order_acq_rel)) {
-            if (bleClient && bleClient->isConnected()) {
-                log_i("[Bridge-BLE] BLE target config updated, disconnecting current session...");
-                bleClient->disconnect();
-                s_ble_connected.store(false, std::memory_order_relaxed);
-                vTaskDelay(pdMS_TO_TICKS(250));
-                continue;
+            toRadioChar = NULL;
+            fromRadioChar = NULL;
+            fromNumChar = NULL;
+            if (bleClient) {
+                if (bleClient->isConnected()) {
+                    log_i("[Bridge-BLE] BLE target config updated, disconnecting current session...");
+                    bleClient->disconnect();
+                    s_ble_connected.store(false, std::memory_order_relaxed);
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+                bleClient->deleteServices();
             }
         }
 
