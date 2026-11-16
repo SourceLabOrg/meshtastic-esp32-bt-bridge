@@ -136,7 +136,7 @@ To prevent high-bandwidth network traffic from starving BLE operations or lockin
 This project uses a combination of native ESP-IDF logging macros and custom overrides to maintain a clean console while allowing dynamic runtime debugging.
 
 ### Background & Limitations
-The underlying Arduino Core (specifically version 2.0.17 used in the official `6.9.0` platform) maps standard `log_d()` calls to a raw `log_printf`. This bypasses the native ESP-IDF `esp_log_level_set()` filtering mechanism. If we compile with global debug logs enabled (`CORE_DEBUG_LEVEL=4`), the internal Arduino libraries (like the WiFi driver) will constantly spam the console with their internal state machine events (`WIFI_READY`, `STA_START`, etc.), and we cannot silence them at runtime.
+The underlying Arduino Core (specifically version 2.0.17 used in the official `6.13.0` platform) maps standard `log_d()` calls to a raw `log_printf`. This bypasses the native ESP-IDF `esp_log_level_set()` filtering mechanism. If we compile with global debug logs enabled (`CORE_DEBUG_LEVEL=4`), the internal Arduino libraries (like the WiFi driver) will constantly spam the console with their internal state machine events (`WIFI_READY`, `STA_START`, etc.), and we cannot silence them at runtime.
 
 ### Our Solution
 To achieve a clean console while preserving our own debug logs, we use the following strategy:
